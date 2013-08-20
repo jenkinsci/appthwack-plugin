@@ -68,17 +68,6 @@
     <maven-hpi-plugin.version>1.96</maven-hpi-plugin.version>
   </properties>
   
-  <build>
-      <plugins>
-          <plugin>
-              <artifactId>maven-release-plugin</artifactId>
-              <configuration>
-                  <goals>deploy</goals>
-              </configuration>
-          </plugin>
-      </plugins>
-  </build>
-  
   <distributionManagement>
       <repository>
           <id>maven.jenkins-ci.org</id>
