@@ -12,15 +12,15 @@ Usage
 
 1.  Add 'Run Tests on AppThwack' post-build action.
 
-[!action](https://raw.github.com/appthwack/appthwack-jenkins/ext/action.png)
+![action](https://raw.github.com/appthwack/appthwack-jenkins/master/ext/action.png)
 
 2.  Configure.
 
-[!options](https://raw.github.com/appthwack/appthwack-jenkins/ext/options.png)
+![options](https://raw.github.com/appthwack/appthwack-jenkins/master/ext/options.png)
 
 3.  Run.
 
-[!output](https://raw.github.com/appthwack/appthwack-jenkins/ext/output.png)
+![output](https://raw.github.com/appthwack/appthwack-jenkins/master/ext/output.png)
 
 
 Dependencies
