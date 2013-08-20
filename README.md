@@ -10,15 +10,15 @@ Current under development.
 Usage
 =====
 
-1.  Add 'Run Tests on AppThwack' post-build action.
+*  1.) Add 'Run Tests on AppThwack' post-build action
 
 ![action](https://raw.github.com/appthwack/appthwack-jenkins/master/ext/action.png)
 
-2.  Configure.
+*  2.) Configure
 
 ![options](https://raw.github.com/appthwack/appthwack-jenkins/master/ext/options.png)
 
-3.  Run.
+*  3.) Run
 
 ![output](https://raw.github.com/appthwack/appthwack-jenkins/master/ext/output.png)
 
