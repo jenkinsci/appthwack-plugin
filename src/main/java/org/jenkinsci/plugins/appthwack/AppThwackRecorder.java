@@ -43,8 +43,7 @@ public class AppThwackRecorder extends Recorder {
 	
 	private PrintStream log;
 	
-	//private static final String DOMAIN = "https://appthwack.com";
-	private static final String DOMAIN = "http://localhost:8001";
+	private static final String DOMAIN = "https://appthwack.com";
 	
 	private static final String JUNIT_TYPE = "junit";
 	private static final String CALABASH_TYPE = "calabash";
