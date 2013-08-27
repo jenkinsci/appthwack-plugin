@@ -1,61 +1,53 @@
 <j:jelly xmlns:j="jelly:core" xmlns:st="jelly:stapler" xmlns:d="jelly:define" xmlns:l="/lib/layout" xmlns:t="/lib/hudson" xmlns:f="/lib/form">
-  <!--
-    This jelly script is used for per-project configuration.
 
-    See global.jelly for a general discussion about jelly script.
-  -->
-
-  <!--
-    Creates a text field that shows the value of the "name" property.
-    When submitted, it will be passed to the corresponding constructor parameter.
-  -->
-  
-  <f:entry title="API Key" field="apiKey" description="See: https://appthwack.com/user/profile">
-    <f:textbox />
-  </f:entry>
-  
-  <f:entry title="Project" field="projectName" description="Ex: My Android Project">
+  <f:entry title="Project" field="projectName" description="[Required] Name of AppThwack project.">
     <f:textbox />
   </f:entry>
 
-  <f:entry title="Device Pool" field="devicePoolName" description="Ex: Top 10 devices">
+  <f:entry title="Device Pool" field="devicePoolName" description="[Required] Name of AppThwack device pool.">
     <f:textbox />
   </f:entry>
   
-  <f:entry title="Application" field="appArtifact" description="Ex: $${workspace}/MyApp/build/apk/MyApp.apk">
+  <f:entry title="Application" field="appArtifact" description="[Required] Pattern to find newly built application.">
     <f:textbox />
   </f:entry>
 
   <f:section title="Choose tests to run">
     <f:radioBlock name="type" value="appexplorer" title="App Explorer" checked="${instance.isType('appexplorer')}" inline="true">
       <f:nested>
-        <f:entry title="# of events" field="eventcount" description="[Optional] Number of MonkeyExerciser events. Default: 500.">
+        <f:entry title="# of events" field="eventcount" description="[Optional] Number of MonkeyExerciser events.">
           <f:textbox/>
         </f:entry>
-        <f:entry title="Username" field="username" description="[Optional] Value to use in Username fields. Default: ">
+        <f:entry title="Username" field="username" description="[Optional] Value to use in Username fields.">
           <f:textbox/>
         </f:entry>
-        <f:entry title="Password" field="password" description="[Optional] Value to use in Password fields. Default: ">
+        <f:entry title="Password" field="password" description="[Optional] Value to use in Password fields.">
           <f:textbox/>
         </f:entry>
-        <f:entry title="Activity Launch Data" field="launchdata" description="[Optional] Extra parameters passed to the launch activity. Default: ">
+        <f:entry title="Activity Launch Data" field="launchdata" description="[Optional] Extra parameters passed to the launch activity.">
           <f:textbox/>
         </f:entry>
-        <f:entry title="MonkeyExerciser Seed" field="monkeyseed" description="[Optional] Seed to use for randomizing events. Default: ">
+        <f:entry title="MonkeyExerciser Seed" field="monkeyseed" description="[Optional] Seed to use for randomizing events.">
           <f:textbox/>
         </f:entry>
       </f:nested>
     </f:radioBlock>
     <f:radioBlock name="type" value="junit" title="JUnit/Robotium" checked="${instance.isType('junit')}" inline="true">
       <f:nested>
-        <f:entry title="Tests" field="testsArtifact" description="Ex: $${workspace}/MyApp/build/apk/MyAppTests.apk">
+        <f:entry title="Tests" field="testsArtifact" description="[Required] Pattern to find newly built tests.">
+          <f:textbox />
+        </f:entry>
+        <f:entry title="Filter" field="testsFilter" description="[Optional] Filter specific TestCase/TestSuite to run.">
           <f:textbox />
         </f:entry>
       </f:nested>
     </f:radioBlock>
     <f:radioBlock name="type" value="calabash" title="Calabash" checked="${instance.isType('calabash')}" inline="true">
       <f:nested>
-        <f:entry title="Features" field="calabashFeatures" description="Ex: $${workspace}/bin/calabash/features.zip">
+        <f:entry title="Features" field="calabashFeatures" description="[Required] Pattern to find features.zip.">
+          <f:textbox />
+        </f:entry>
+        <f:entry title="Tags" field="calabashTags" description="[Optional] Tags to pass into Calabash.">
           <f:textbox />
         </f:entry>
       </f:nested>

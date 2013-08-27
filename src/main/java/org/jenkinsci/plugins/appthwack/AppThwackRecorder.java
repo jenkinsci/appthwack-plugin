@@ -18,8 +18,8 @@ import hudson.Launcher;
 import hudson.model.AbstractBuild;
 import hudson.model.AbstractProject;
 import hudson.model.BuildListener;
-
 import hudson.model.Result;
+import hudson.remoting.VirtualChannel;
 import hudson.tasks.BuildStepDescriptor;
 import hudson.tasks.BuildStepMonitor;
 import hudson.tasks.Publisher;
@@ -43,19 +43,21 @@ public class AppThwackRecorder extends Recorder {
 	
 	private PrintStream log;
 	
-	private static final String DOMAIN = "https://appthwack.com";
+	//private static final String DOMAIN = "https://appthwack.com";
+	private static final String DOMAIN = "http://localhost:8001";
 	
 	private static final String JUNIT_TYPE = "junit";
 	private static final String CALABASH_TYPE = "calabash";
 	private static final String APP_EXPLORER_TYPE = "appexplorer";
 	
-	public String apiKey;
 	public String projectName;
 	public String devicePoolName;
 	public String appArtifact;
 	public String type;
 	public String calabashFeatures;
+	public String calabashTags;
 	public String testsArtifact;
+	public String testsFilter;
 	public String eventcount;
 	public String username;
 	public String password;
@@ -63,25 +65,27 @@ public class AppThwackRecorder extends Recorder {
 	public String monkeyseed;
 
 	@DataBoundConstructor
-	public AppThwackRecorder(String apiKey,
-			String projectName,
+	public AppThwackRecorder(String projectName,
 			String devicePoolName,
 			String appArtifact,
 			String type,
 			String calabashFeatures,
+			String calabashTags,
 			String testsArtifact,
+			String testsFilter,
 			String eventcount,
 			String username,
 			String password,
 			String launchdata,
 			String monkeyseed) {
-		this.apiKey = apiKey;
 		this.projectName = projectName;
 		this.devicePoolName = devicePoolName;
 		this.appArtifact = appArtifact;
 		this.type = type;
 		this.calabashFeatures = calabashFeatures;
+		this.calabashTags = calabashTags;
 		this.testsArtifact = testsArtifact;
+		this.testsFilter = testsFilter;
 		this.eventcount = eventcount;
 		this.username = username;
 		this.password = password;
@@ -89,35 +93,38 @@ public class AppThwackRecorder extends Recorder {
 		this.monkeyseed = monkeyseed;
 	}
 	
+	public String getApiKey() {
+		return getDescriptor().apiKey;
+	}
+	
 	@Override
 	public boolean perform(AbstractBuild build, Launcher launcher, BuildListener listener) {
-		log = listener.getLogger();
-		
+		//Build failed earlier in the chain, no need to test.
+		if (build.getResult().isWorseOrEqualTo(Result.FAILURE)) {
+			return false;
+		}
 		//Something is f'd.
 		EnvVars env = getEnvironment(build, listener);
 		if (env == null) {
 			return false;
 		}
+		log = listener.getLogger();
 		
-		//Build failed earlier in the chain, no need to test.
-		if (build.getResult().isWorseOrEqualTo(Result.FAILURE)) {
-			return false;
-		}
+		//Artifacts location for this build on master.
+		FilePath artifactsDir = new FilePath(build.getArtifactsDir());
+		
+		//Workspace (potentially remote if using slave).
+		FilePath workspace = build.getWorkspace();
 		
 		//Validate user selection & input values.
 		boolean isValid = validateConfiguration() && validateTestConfiguration();
 		if (!isValid) {
-			return false;
-		}
-		
-		//Create/Validate app artifact and make local copy.
-		File appArtifactFile = new File(env.expand(appArtifact));
-		if (appArtifactFile == null) {
+			LOG("Invalid configuration.");
 			return false;
 		}
 		
 		//Create & configure the AppThwackApi client.
-		LOG(String.format("Using API Key %s", apiKey));
+		String apiKey = getApiKey();
 		AppThwackApi api = new AppThwackApi(apiKey, DOMAIN);
 		
 		//Get AppThwack project from user provided name.
@@ -135,16 +142,24 @@ public class AppThwackRecorder extends Recorder {
 			LOG(String.format("DevicePool '%s' not found.", devicePoolName));
 			return false;
 		}
+
+		//Create/Validate app artifact and make local copy.
+		File appArtifactFile = getArtifactFile(artifactsDir, workspace, env.expand(appArtifact));
+		if (appArtifactFile == null || !appArtifactFile.exists()) {
+			LOG("Application Artifact not found.");
+			return false;
+		}
 		
 		//Upload app.
+		LOG(String.format("Using App '%s'", appArtifactFile.getAbsolutePath()));
 		AppThwackFile app = uploadFile(api, appArtifactFile);
 		if (app == null) {
-			LOG(String.format("Failed to upload app '%s'", appArtifactFile.getName()));
+			LOG(String.format("Failed to upload app '%s'", appArtifactFile.getAbsolutePath()));
 			return false;
 		}
 		
 		//Upload test content.
-		AppThwackFile tests = uploadTestContent(api, env);
+		AppThwackFile tests = uploadTestContent(api, env, artifactsDir, workspace);
 		if (tests == null && !type.equalsIgnoreCase(APP_EXPLORER_TYPE)) {
 			LOG("Failed to upload required test content.");
 			return false;
@@ -160,6 +175,39 @@ public class AppThwackRecorder extends Recorder {
 		//Huzzah!
 		LOG(String.format("Congrats! See your test run at %s/%s", DOMAIN, run.toString()));
 		return true;
+	}
+	
+	/**
+	 * Gets a local File instance of a glob file pattern, pulling it from a slave if necessary.
+	 * @param artifactsDir artifacts directory on master 
+	 * @param workspace workspace to search for matches, usually the jenkins workspace
+	 * @param pattern Glob pattern to find artifacts
+	 * @return
+	 */
+	public File getArtifactFile(FilePath artifactsDir, FilePath workspace, String pattern) {
+		try {
+			//Find glob matches.
+			FilePath[] matches = workspace.list(pattern);
+			if (matches == null || matches.length == 0) {
+				LOG(String.format("No Artifacts found using pattern '%s'", pattern));
+				return null;
+			}
+			//Use the first match if multiple found.
+			FilePath artifact = matches[0];
+			if (matches.length > 1) {
+				LOG(String.format("WARNING: Multiple artifact matches found, defaulting to '%s'", artifact.getName()));
+			}
+			LOG(String.format("Archiving artifact '%s'", artifact.getName()));
+			
+			//Copy file (master or slave) to the build artifact directory on the master.
+			FilePath localArtifact = new FilePath(artifactsDir, artifact.getName());
+			artifact.copyTo(localArtifact);
+			return new File(localArtifact.toString());
+		}
+		catch (Exception e) {
+			LOG(String.format("Unable to find artifact %s", e.toString()));
+			return null;
+		}
 	}
 	
 	/**
@@ -180,10 +228,10 @@ public class AppThwackRecorder extends Recorder {
 										AppThwackFile tests) {
 		try {
 			if (type.equalsIgnoreCase(JUNIT_TYPE)) {
-				return project.scheduleJUnitRun(app, tests, name, pool);
+				return project.scheduleJUnitRun(app, tests, name, pool, testsFilter);
 			}
 			if (type.equalsIgnoreCase(CALABASH_TYPE)) {
-				return project.scheduleCalabashRun(app, tests, name, pool);
+				return project.scheduleCalabashRun(app, tests, name, pool, calabashTags);
 			}
 			if (type.equalsIgnoreCase(APP_EXPLORER_TYPE)) {
 				HashMap<String, String> explorerOptions = new HashMap<String, String>()
@@ -215,7 +263,7 @@ public class AppThwackRecorder extends Recorder {
 			return api.uploadFile(file);
 		}
 		catch (AppThwackException e) {
-			LOG(String.format("Failed to upload file '%s'", file.getName()));
+			LOG(String.format("Exception '%s' raised when uploading file '%s'", e.getMessage(), file.getAbsolutePath()));
 			return null;
 		}
 	}
@@ -224,21 +272,25 @@ public class AppThwackRecorder extends Recorder {
 	 * Upload JUnit/Robotium test app or Calabash scripts to AppThwack.
 	 * @param api AppThwackApi instance to use.
 	 * @param env Environment variables for the current job.
+	 * @param artifactsDir artifacts path on master for this build
+	 * @param workspace path to local/remote workspace for this build
 	 * @return object which represents a remote file on AppThwack.
 	 */
-	private AppThwackFile uploadTestContent(AppThwackApi api, EnvVars env) {
+	private AppThwackFile uploadTestContent(AppThwackApi api, EnvVars env, FilePath artifactsDir, FilePath workspace) {
 		//JUnit/Robotium: Upload tests .apk file.
 		if (type.equalsIgnoreCase(JUNIT_TYPE)) {
-			File tests = new File(env.expand(testsArtifact));
+			//Get JUnit/Robotium apk from given glob pattern.
+			File tests = getArtifactFile(artifactsDir, workspace, env.expand(testsArtifact));
 			if (tests == null) {
 				LOG("No tests provided for JUnit/Robotium selection.");
 				return null;
 			}
-			LOG(String.format("Uploading JUnit/Robotium content '%s'", tests.getName()));
+			LOG(String.format("Using JUnit/Robotium content '%s'", tests.getAbsolutePath()));
 			
+			//Upload this test apk to AppThwack.
 			AppThwackFile upload = uploadFile(api, tests);
 			if (upload == null) {
-				LOG(String.format("Failed to upload tests '%s'", tests.getName()));
+				LOG(String.format("Failed to upload tests '%s'", tests.getAbsolutePath()));
 				return null;
 			}
 			return upload;
@@ -250,16 +302,18 @@ public class AppThwackRecorder extends Recorder {
 				return null;
 			}
 			
-			File features = new File(env.expand(calabashFeatures));
+			//Get Calabash features.zip from given glob pattern.
+			File features = getArtifactFile(artifactsDir, workspace, env.expand(calabashFeatures));
 			if (!features.exists()) {
 				LOG(String.format("Calabash content not found at '%s'", features.getAbsolutePath()));
 				return null;
 			}
-			LOG(String.format("Uploading Calabash content '%s'", features.getName()));
+			LOG(String.format("Using Calabash content '%s'", features.getAbsolutePath()));
 			
+			//Upload the features.zip to AppThwack.
 			AppThwackFile upload = uploadFile(api, features);
 			if (upload == null) {
-				LOG(String.format("Failed to upload tests '%s'", features.getName()));
+				LOG(String.format("Failed to upload tests '%s'", features.getAbsolutePath()));
 				return null;
 			}
 			return upload;
@@ -273,6 +327,7 @@ public class AppThwackRecorder extends Recorder {
 	 */
 	private boolean validateConfiguration() {
 		//[Required]: API Key
+		String apiKey = getApiKey();
 		if (apiKey == null || apiKey.isEmpty()) {
 			LOG("API Key must be set.");
 			return false;
@@ -320,6 +375,16 @@ public class AppThwackRecorder extends Recorder {
 			if (calabashFeatures == null || calabashFeatures.isEmpty()) {
 				LOG("Calabash Features must be set.");
 				return false;
+			}
+			//[Optional]: Calabash Tags
+			if (!(calabashTags == null || calabashTags.isEmpty())) {
+	        	String[] tags = calabashTags.split(",");
+	        	for (String tag : tags) {
+	        		if (!tag.startsWith("@")) {
+	        			LOG(String.format("Missing '@' in tag '%s'.", tag));
+	        			return false;
+	        		}
+	        	}
 			}
 			return true;
 		}
@@ -418,6 +483,12 @@ public class AppThwackRecorder extends Recorder {
     @Extension
 	public static final class DescriptorImpl extends BuildStepDescriptor<Publisher> {
     	
+    	public String apiKey;
+    	
+    	public DescriptorImpl() {
+    		load();
+    	}
+    	
         /**
          * Validate the user account API key.
          * @param apiKey
@@ -501,6 +572,46 @@ public class AppThwackRecorder extends Recorder {
         		return FormValidation.error("Required!");
         	}
         	return FormValidation.ok();
+        }
+        
+        /**
+         * Validate the user entered Calabash tags.
+         * @param calabashTags
+         * @return
+         */
+        public FormValidation doCheckCalabashTags(@QueryParameter String calabashTags) {
+        	if (calabashTags == null || calabashTags.isEmpty()) {
+        		return FormValidation.ok();
+        	}
+        	String[] tags = calabashTags.split(",");
+        	for (String tag : tags) {
+        		if (!tag.startsWith("@")) {
+        			return FormValidation.error(String.format("Missing '@' in tag '%s'.", tag));
+        		}
+        	}
+        	return FormValidation.ok();
+        }
+        
+        /**
+         * Validate the user entered JUnit/Robotium filter.
+         * @param testsFilter
+         * @return
+         */
+        public FormValidation doCheckTestsFilter(@QueryParameter String testsFilter) {
+        	return FormValidation.ok();
+        }
+        
+        /**
+         * Bind descriptor object to capture global plugin settings from 'Manage Jenkins'.
+         * @param req
+         * @param json
+         * @return
+         */
+        @Override
+        public boolean configure(StaplerRequest req, JSONObject json) {
+        	req.bindJSON(this, json);
+        	save();
+        	return true;
         }
 		
 		@Override
