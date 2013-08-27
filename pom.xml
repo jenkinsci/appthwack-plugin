@@ -31,7 +31,7 @@
   </licenses>
   
   <scm>
-    <connection>scm:git:ssh://git@github.com/jenkinsci/appthwack-plugin.git</connection>
+    <connection>scm:git:ssh://github.com/jenkinsci/appthwack-plugin.git</connection>
     <developerConnection>scm:git:ssh://git@github.com/jenkinsci/appthwack-plugin.git</developerConnection>
     <url>https://github.com/jenkinsci/appthwack-plugin</url>
   </scm>
