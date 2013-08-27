@@ -67,11 +67,4 @@
     -->
     <maven-hpi-plugin.version>1.96</maven-hpi-plugin.version>
   </properties>
-  
-  <distributionManagement>
-      <repository>
-          <id>maven.jenkins-ci.org</id>
-          <url>http://maven.jenkins-ci.org:8001/content/repositories/releases/</url>
-      </repository>
-  </distributionManagement>
 </project>
