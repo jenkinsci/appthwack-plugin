@@ -13,7 +13,7 @@
   </f:entry>
 
   <f:section title="Choose tests to run">
-    <f:radioBlock name="type" value="appexplorer" title="App Explorer" checked="${instance.isType('appexplorer')}" inline="true">
+    <f:radioBlock name="type" value="builtinAndroid" title="Built-in Android Test Suite" checked="${instance.isType('builtinAndroid')}" inline="true">
       <f:nested>
         <f:entry title="# of events" field="eventcount" description="[Optional] Number of MonkeyExerciser events.">
           <f:textbox/>
@@ -32,15 +32,7 @@
         </f:entry>
       </f:nested>
     </f:radioBlock>
-    <f:radioBlock name="type" value="junit" title="JUnit/Robotium" checked="${instance.isType('junit')}" inline="true">
-      <f:nested>
-        <f:entry title="Tests" field="testsArtifact" description="[Required] Pattern to find newly built tests.">
-          <f:textbox />
-        </f:entry>
-        <f:entry title="Filter" field="testsFilter" description="[Optional] Filter specific TestCase/TestSuite to run.">
-          <f:textbox />
-        </f:entry>
-      </f:nested>
+    <f:radioBlock name="type" value="builtinIOS" title="Built-in iOS Test Suite" checked="${instance.isType('builtinIOS')}" inline="true">
     </f:radioBlock>
     <f:radioBlock name="type" value="calabash" title="Calabash" checked="${instance.isType('calabash')}" inline="true">
       <f:nested>
@@ -51,6 +43,32 @@
           <f:textbox />
         </f:entry>
       </f:nested>
+    </f:radioBlock>
+    <f:radioBlock name="type" value="junit" title="JUnit/Robotium" checked="${instance.isType('junit')}" inline="true">
+      <f:nested>
+        <f:entry title="Tests" field="junitArtifact" description="[Required] Pattern to find JUnit tests.">
+          <f:textbox />
+        </f:entry>
+        <f:entry title="Filter" field="junitFilter" description="[Optional] Filter specific TestCase/TestSuite to run.">
+          <f:textbox />
+        </f:entry>
+      </f:nested>
+    </f:radioBlock>
+    <f:radioBlock name="type" value="kif" title="KIF" checked="${instance.isType('kif')}" inline="true">
+    </f:radioBlock>
+    <f:radioBlock name="type" value="monkeytalk" title="MonkeyTalk" checked="${instance.isType('monkeytalk')}" inline="true">
+      <f:nested>
+        <f:entry title="Tests" field="monkeyArtifact" description="[Required] Pattern to find MonkeyTalk tests.">
+          <f:textbox />
+        </f:entry>
+      </f:nested>
+    </f:radioBlock>
+    <f:radioBlock name="type" value="uia" title="UIA" checked="${instance.isType('uia')}" inline="true">
+     <f:nested>
+       <f:entry title="Tests" field="uiaArtifact" description="[Required] Pattern to find UIA tests.">
+         <f:textbox />
+       </f:entry>
+     </f:nested>
     </f:radioBlock>
   </f:section>
   
