@@ -47,7 +47,11 @@ public class AppThwackRecorder extends Recorder {
 	
 	private static final String JUNIT_TYPE = "junit";
 	private static final String CALABASH_TYPE = "calabash";
-	private static final String APP_EXPLORER_TYPE = "appexplorer";
+	private static final String MONKEYTALK_TYPE = "monkeytalk";
+	private static final String KIF_TYPE = "kif";
+	private static final String UIA_TYPE = "uia";
+	private static final String BUILTIN_ANDROID_TYPE = "builtinAndroid";
+	private static final String BUILTIN_IOS_TYPE = "builtinIOS";
 	
 	public String projectName;
 	public String devicePoolName;
@@ -55,14 +59,16 @@ public class AppThwackRecorder extends Recorder {
 	public String type;
 	public String calabashFeatures;
 	public String calabashTags;
-	public String testsArtifact;
-	public String testsFilter;
+	public String junitArtifact;
+	public String junitFilter;
+	public String monkeyArtifact;
+	public String uiaArtifact;
 	public String eventcount;
 	public String username;
 	public String password;
 	public String launchdata;
 	public String monkeyseed;
-
+	
 	@DataBoundConstructor
 	public AppThwackRecorder(String projectName,
 			String devicePoolName,
@@ -70,8 +76,10 @@ public class AppThwackRecorder extends Recorder {
 			String type,
 			String calabashFeatures,
 			String calabashTags,
-			String testsArtifact,
-			String testsFilter,
+			String junitArtifact,
+			String junitFilter,
+			String monkeyArtifact,
+			String uiaArtifact,
 			String eventcount,
 			String username,
 			String password,
@@ -83,8 +91,10 @@ public class AppThwackRecorder extends Recorder {
 		this.type = type;
 		this.calabashFeatures = calabashFeatures;
 		this.calabashTags = calabashTags;
-		this.testsArtifact = testsArtifact;
-		this.testsFilter = testsFilter;
+		this.junitArtifact = junitArtifact;
+		this.junitFilter = junitFilter;
+		this.monkeyArtifact = monkeyArtifact;
+		this.uiaArtifact = uiaArtifact;
 		this.eventcount = eventcount;
 		this.username = username;
 		this.password = password;
@@ -97,16 +107,12 @@ public class AppThwackRecorder extends Recorder {
 	}
 	
 	@Override
-	public boolean perform(AbstractBuild build, Launcher launcher, BuildListener listener) {
+	public boolean perform(AbstractBuild build, Launcher launcher, BuildListener listener) throws IOException, InterruptedException {
 		//Build failed earlier in the chain, no need to test.
 		if (build.getResult().isWorseOrEqualTo(Result.FAILURE)) {
 			return false;
 		}
-		//Something is f'd.
-		EnvVars env = getEnvironment(build, listener);
-		if (env == null) {
-			return false;
-		}
+		EnvVars env =  build.getEnvironment(listener);
 		log = listener.getLogger();
 		
 		//Artifacts location for this build on master.
@@ -159,8 +165,8 @@ public class AppThwackRecorder extends Recorder {
 		
 		//Upload test content.
 		AppThwackFile tests = uploadTestContent(api, env, artifactsDir, workspace);
-		if (tests == null && !type.equalsIgnoreCase(APP_EXPLORER_TYPE)) {
-			LOG("Failed to upload required test content.");
+		if (tests == null && requiresTestContent(type)) {
+			LOG(String.format("Failed to upload required '%s' test content.", type));
 			return false;
 		}
 		
@@ -226,23 +232,51 @@ public class AppThwackRecorder extends Recorder {
 										AppThwackFile app,
 										AppThwackFile tests) {
 		try {
+			//JUnit/Robotium Tests
 			if (type.equalsIgnoreCase(JUNIT_TYPE)) {
-				return project.scheduleJUnitRun(app, tests, name, pool, testsFilter);
+				return project.scheduleJUnitRun(app, tests, name, pool, junitFilter);
 			}
+			//Calabash (Android/iOS) Tests
 			if (type.equalsIgnoreCase(CALABASH_TYPE)) {
 				return project.scheduleCalabashRun(app, tests, name, pool, calabashTags);
 			}
-			if (type.equalsIgnoreCase(APP_EXPLORER_TYPE)) {
-				HashMap<String, String> explorerOptions = new HashMap<String, String>()
-						{{
-							put("eventcount", eventcount);
-							put("username", username);
-							put("password", password);
-							put("launchdata", launchdata);
-							put("monkeyseed", monkeyseed);
-						}};
+			//Built-in Android (AppExplorer + ExerciserMonkey)
+			if (type.equalsIgnoreCase(BUILTIN_ANDROID_TYPE)) {
+				HashMap<String, String> explorerOptions = new HashMap<String, String>();
+				if (eventcount != null && !eventcount.isEmpty() && isNumeric(eventcount)) {
+					explorerOptions.put("eventcount", eventcount);
+				}
+				if (username != null && !username.isEmpty()) {
+					explorerOptions.put("username", username);
+				}
+				if (password != null && !password.isEmpty()) {
+					explorerOptions.put("password", password);
+				}
+				if (launchdata != null && !launchdata.isEmpty()) {
+					explorerOptions.put("launchdata", launchdata);
+				}
+				if (monkeyseed != null && !monkeyseed.isEmpty() && isNumeric(monkeyseed)) {
+					explorerOptions.put("monkeyseed", monkeyseed);
+				}
 				return project.scheduleAppExplorerRun(app, name, pool, explorerOptions);
 			}
+			//MonkeyTalk (Android)
+			if (type.equalsIgnoreCase(MONKEYTALK_TYPE)) {
+				return project.scheduleMonkeyTalkRun(app, tests, name, pool);
+			}
+			//KIF (iOS)
+			if (type.equalsIgnoreCase(KIF_TYPE)) {
+				return project.scheduleKIFRun(app, name, pool);
+			}
+			//UIA (iOS)
+			if (type.equalsIgnoreCase(UIA_TYPE)) {
+				return project.scheduleUIARun(app, tests, name, pool);
+			}
+			//Build-in iOS (Monkey)
+			if (type.equalsIgnoreCase(BUILTIN_IOS_TYPE)) {
+				return project.scheduleBuiltinIOSRun(app, name, pool);
+			}
+			//Unknown!
 			return null;
 		}
 		catch (AppThwackException e) {
@@ -276,48 +310,47 @@ public class AppThwackRecorder extends Recorder {
 	 * @return object which represents a remote file on AppThwack.
 	 */
 	private AppThwackFile uploadTestContent(AppThwackApi api, EnvVars env, FilePath artifactsDir, FilePath workspace) {
+		File tests = null;
+		
 		//JUnit/Robotium: Upload tests .apk file.
 		if (type.equalsIgnoreCase(JUNIT_TYPE)) {
 			//Get JUnit/Robotium apk from given glob pattern.
-			File tests = getArtifactFile(artifactsDir, workspace, env.expand(testsArtifact));
-			if (tests == null) {
-				LOG("No tests provided for JUnit/Robotium selection.");
-				return null;
-			}
-			LOG(String.format("Using JUnit/Robotium content '%s'", tests.getAbsolutePath()));
-			
-			//Upload this test apk to AppThwack.
-			AppThwackFile upload = uploadFile(api, tests);
-			if (upload == null) {
-				LOG(String.format("Failed to upload tests '%s'", tests.getAbsolutePath()));
-				return null;
-			}
-			return upload;
+			tests = getArtifactFile(artifactsDir, workspace, env.expand(junitArtifact));
 		}
 		//Calabash: Upload features.zip file.
-		if (type.equalsIgnoreCase(CALABASH_TYPE)) {
-			if (!calabashFeatures.endsWith(".zip")) {
-				LOG("Calabash content must be of type .zip");
-				return null;
-			}
-			
+		else if (type.equalsIgnoreCase(CALABASH_TYPE)) {
 			//Get Calabash features.zip from given glob pattern.
-			File features = getArtifactFile(artifactsDir, workspace, env.expand(calabashFeatures));
-			if (!features.exists()) {
-				LOG(String.format("Calabash content not found at '%s'", features.getAbsolutePath()));
-				return null;
-			}
-			LOG(String.format("Using Calabash content '%s'", features.getAbsolutePath()));
-			
-			//Upload the features.zip to AppThwack.
-			AppThwackFile upload = uploadFile(api, features);
-			if (upload == null) {
-				LOG(String.format("Failed to upload tests '%s'", features.getAbsolutePath()));
-				return null;
-			}
-			return upload;
+			tests = getArtifactFile(artifactsDir, workspace, env.expand(calabashFeatures));
 		}
-		return null;
+		else if (type.equalsIgnoreCase(MONKEYTALK_TYPE)) {
+			//Get MonkeyTalk tests (.zip) from given pattern.
+			tests = getArtifactFile(artifactsDir, workspace, env.expand(monkeyArtifact));
+		}
+		//UIA: Upload tests .js file.
+		else if (type.equalsIgnoreCase(UIA_TYPE)) {
+			//Get UIA .js file from given glob pattern.
+			tests = getArtifactFile(artifactsDir, workspace, env.expand(uiaArtifact));
+		}
+		
+		//Test type has no explicit test artifacts or failed to find them.
+		if (tests == null) {
+			return null;
+		}
+		//Provided valid path but no file exists there.
+		if (!tests.exists()) {
+			LOG(String.format("No test content found at '%s'", tests.getAbsolutePath()));
+			return null;
+		}
+		
+		LOG(String.format("Using '%s' test content from '%s'", type, tests.getAbsolutePath()));
+		
+		//Upload test artifacts to AppThwack.
+		AppThwackFile upload = uploadFile(api, tests);
+		if (upload == null) {
+			LOG(String.format("Failed to upload test content '%s'", tests.getAbsolutePath()));
+			return null;
+		}
+		return upload;
 	}
 	
 	/**
@@ -362,7 +395,7 @@ public class AppThwackRecorder extends Recorder {
 		//JUnit/Robotium
 		if (type.equalsIgnoreCase(JUNIT_TYPE)) {
 			//[Required]: Tests Artifact
-			if (testsArtifact == null || testsArtifact.isEmpty()) {
+			if (junitArtifact == null || junitArtifact.isEmpty()) {
 				LOG("Tests Artifact must be set.");
 				return false;
 			}
@@ -373,6 +406,11 @@ public class AppThwackRecorder extends Recorder {
 			//[Required]: Features Path
 			if (calabashFeatures == null || calabashFeatures.isEmpty()) {
 				LOG("Calabash Features must be set.");
+				return false;
+			}
+			//[Required]: Features.zip
+			if (!calabashFeatures.endsWith(".zip")) {
+				LOG("Calabash content must be of type .zip");
 				return false;
 			}
 			//[Optional]: Calabash Tags
@@ -387,8 +425,8 @@ public class AppThwackRecorder extends Recorder {
 			}
 			return true;
 		}
-		//AppExplorer
-		else if (type.equalsIgnoreCase(APP_EXPLORER_TYPE)) {
+		//Android Built-in 
+		else if (type.equalsIgnoreCase(BUILTIN_ANDROID_TYPE)) {
 			//[Optional]: EventCount (int)
 			if (eventcount != null && !eventcount.isEmpty()) {
 				if (!isNumeric(eventcount)) {
@@ -405,27 +443,46 @@ public class AppThwackRecorder extends Recorder {
 			}
 			return true;
 		}
+		//MonkeyTalk
+		else if (type.equalsIgnoreCase(MONKEYTALK_TYPE)) {
+			if (monkeyArtifact == null || monkeyArtifact.isEmpty()) {
+				LOG("MonkeyTalk Artifact must be set.");
+				return false;
+			}
+			return true;
+		}
+		//UIA
+		else if (type.equalsIgnoreCase(UIA_TYPE)) {
+			//[Required]: Tests Artifact
+			if (uiaArtifact == null || uiaArtifact.isEmpty()) {
+				LOG("UIA tests artifact is empty.");
+				return false;
+			}
+			return true;
+		}
+		//KIF
+		else if (type.equalsIgnoreCase(KIF_TYPE)) {
+			//KIF has no configuration options.
+			return true;
+		}
+		//iOS Built-in
+		else if (type.equalsIgnoreCase(BUILTIN_IOS_TYPE)) {
+			//iOS Built-in has no configuration options.
+			return true;
+		}
 		//Unknown
 		LOG(String.format("Invalid test type %s", type));
 		return false;
 	}
 	
 	/**
-	 * Helper method to eat exceptions when capturing the environment as the perform function isn't checked.
-	 * @param build AbstractBuild instance for the current Jenkins job.
-	 * @param listener BuildListener instance for the current Jenkins job.
-	 * @return Environment for the current Jenkins job.
+	 * Helper method which returns True if the given test type requires explicit test content file(s).
+	 * @return
 	 */
-	private EnvVars getEnvironment(AbstractBuild build, BuildListener listener) {
-		try {
-			return build.getEnvironment(listener);
-		}
-		catch (IOException e) {
-			return null;
-		}
-		catch (InterruptedException e) {
-			return null;
-		}
+	private boolean requiresTestContent(String type) {
+		return !(type.equalsIgnoreCase(BUILTIN_ANDROID_TYPE)
+				|| type.equalsIgnoreCase(KIF_TYPE)
+				|| type.equalsIgnoreCase(BUILTIN_IOS_TYPE));
 	}
 	
 	/**
@@ -542,7 +599,14 @@ public class AppThwackRecorder extends Recorder {
          * @return
          */
         public FormValidation doCheckType(@QueryParameter String type) {
-        	boolean isKnownType = Arrays.asList(JUNIT_TYPE, CALABASH_TYPE, APP_EXPLORER_TYPE).contains(type);
+        	boolean isKnownType = Arrays.asList(
+        			JUNIT_TYPE, 
+        			CALABASH_TYPE, 
+        			BUILTIN_ANDROID_TYPE,
+        			KIF_TYPE,
+        			UIA_TYPE,
+        			BUILTIN_IOS_TYPE).contains(type);
+        	
         	if (!isKnownType) {
         		return FormValidation.error(String.format("Unknown test type %s.", type));
         	}
@@ -551,11 +615,11 @@ public class AppThwackRecorder extends Recorder {
         
         /**
          * Validate the user entered artifact for JUnit/Robotium test content.
-         * @param testsArtifact
+         * @param junitArtifact
          * @return
          */
-        public FormValidation doCheckTestsArtifact(@QueryParameter String testsArtifact) {
-        	if (testsArtifact == null || testsArtifact.isEmpty()) {
+        public FormValidation doCheckJunitArtifact(@QueryParameter String junitArtifact) {
+        	if (junitArtifact == null || junitArtifact.isEmpty()) {
         		return FormValidation.error("Required!");
         	}
         	return FormValidation.ok();
@@ -593,10 +657,34 @@ public class AppThwackRecorder extends Recorder {
         
         /**
          * Validate the user entered JUnit/Robotium filter.
-         * @param testsFilter
+         * @param junitFilter
          * @return
          */
-        public FormValidation doCheckTestsFilter(@QueryParameter String testsFilter) {
+        public FormValidation doCheckJunitFilter(@QueryParameter String junitFilter) {
+        	return FormValidation.ok();
+        }
+        
+        /**
+         * Validate the user entered UIA artifact.
+         * @param uiaArtifact
+         * @return
+         */
+        public FormValidation doCheckUiaArtifact(@QueryParameter String uiaArtifact) {
+        	if (uiaArtifact == null || uiaArtifact.isEmpty()) {
+        		return FormValidation.error("Required!");
+        	}
+        	return FormValidation.ok();
+        }
+        
+        /**
+         * Validate the user entered MonkeyTalk artifact.
+         * @param monkeyArtifact
+         * @return
+         */
+        public FormValidation doCheckMonkeyArtifact(@QueryParameter String monkeyArtifact) {
+        	if (monkeyArtifact == null || monkeyArtifact.isEmpty()) {
+        		return FormValidation.error("Required");
+        	}
         	return FormValidation.ok();
         }
         
