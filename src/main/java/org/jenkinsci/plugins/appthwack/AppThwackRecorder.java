@@ -175,7 +175,7 @@ public class AppThwackRecorder extends Recorder {
 		
 		//Schedule the test run.
 		LOG(String.format("Scheduling '%s' run '%s'", type, name));
-		AppThwackRun run = scheduleTestRun(project, devicePool, type, name, app, tests);
+		AppThwackRun run = scheduleTestRun(project, devicePool, type, name, app, tests, env);
 		
 		//Huzzah!
 		LOG(String.format("Congrats! See your test run at %s/%s", DOMAIN, run.toString()));
@@ -230,15 +230,16 @@ public class AppThwackRecorder extends Recorder {
 										String type,
 										String name,
 										AppThwackFile app,
-										AppThwackFile tests) {
+										AppThwackFile tests,
+										EnvVars env) {
 		try {
 			//JUnit/Robotium Tests
 			if (type.equalsIgnoreCase(JUNIT_TYPE)) {
-				return project.scheduleJUnitRun(app, tests, name, pool, junitFilter);
+				return project.scheduleJUnitRun(app, tests, name, pool, env.expand(junitFilter));
 			}
 			//Calabash (Android/iOS) Tests
 			if (type.equalsIgnoreCase(CALABASH_TYPE)) {
-				return project.scheduleCalabashRun(app, tests, name, pool, calabashTags);
+				return project.scheduleCalabashRun(app, tests, name, pool, env.expand(calabashTags));
 			}
 			//Built-in Android (AppExplorer + ExerciserMonkey)
 			if (type.equalsIgnoreCase(BUILTIN_ANDROID_TYPE)) {
@@ -412,16 +413,6 @@ public class AppThwackRecorder extends Recorder {
 			if (!calabashFeatures.endsWith(".zip")) {
 				LOG("Calabash content must be of type .zip");
 				return false;
-			}
-			//[Optional]: Calabash Tags
-			if (!(calabashTags == null || calabashTags.isEmpty())) {
-	        	String[] tags = calabashTags.split(",");
-	        	for (String tag : tags) {
-	        		if (!tag.startsWith("@")) {
-	        			LOG(String.format("Missing '@' in tag '%s'.", tag));
-	        			return false;
-	        		}
-	        	}
 			}
 			return true;
 		}
@@ -643,15 +634,6 @@ public class AppThwackRecorder extends Recorder {
          * @return
          */
         public FormValidation doCheckCalabashTags(@QueryParameter String calabashTags) {
-        	if (calabashTags == null || calabashTags.isEmpty()) {
-        		return FormValidation.ok();
-        	}
-        	String[] tags = calabashTags.split(",");
-        	for (String tag : tags) {
-        		if (!tag.startsWith("@")) {
-        			return FormValidation.error(String.format("Missing '@' in tag '%s'.", tag));
-        		}
-        	}
         	return FormValidation.ok();
         }
         
