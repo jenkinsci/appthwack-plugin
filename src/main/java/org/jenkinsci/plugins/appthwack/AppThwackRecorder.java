@@ -1,16 +1,6 @@
 package org.jenkinsci.plugins.appthwack;
 
-import java.io.File;
-import java.io.FileOutputStream;
-import java.io.IOException;
-import java.io.PrintStream;
-import java.io.Serializable;
-
-import java.util.Arrays;
-import java.util.HashMap;
-import java.util.List;
-import java.util.logging.Logger;
-
+import com.appthwack.appthwack.*;
 import hudson.EnvVars;
 import hudson.Extension;
 import hudson.FilePath;
@@ -19,20 +9,35 @@ import hudson.model.AbstractBuild;
 import hudson.model.AbstractProject;
 import hudson.model.BuildListener;
 import hudson.model.Result;
-import hudson.remoting.VirtualChannel;
 import hudson.tasks.BuildStepDescriptor;
 import hudson.tasks.BuildStepMonitor;
 import hudson.tasks.Publisher;
 import hudson.tasks.Recorder;
 import hudson.util.FormValidation;
-
+import net.sf.json.JSONObject;
+import org.apache.http.HttpEntity;
+import org.apache.http.HttpHost;
+import org.apache.http.auth.AuthScope;
+import org.apache.http.auth.UsernamePasswordCredentials;
+import org.apache.http.client.AuthCache;
+import org.apache.http.client.CredentialsProvider;
+import org.apache.http.client.methods.CloseableHttpResponse;
+import org.apache.http.client.methods.HttpGet;
+import org.apache.http.client.protocol.HttpClientContext;
+import org.apache.http.client.utils.URIBuilder;
+import org.apache.http.impl.auth.BasicScheme;
+import org.apache.http.impl.client.BasicAuthCache;
+import org.apache.http.impl.client.BasicCredentialsProvider;
+import org.apache.http.impl.client.CloseableHttpClient;
+import org.apache.http.impl.client.HttpClients;
 import org.kohsuke.stapler.DataBoundConstructor;
 import org.kohsuke.stapler.QueryParameter;
 import org.kohsuke.stapler.StaplerRequest;
 
-import net.sf.json.JSONObject;
-
-import com.appthwack.appthwack.*;
+import java.io.*;
+import java.net.URI;
+import java.util.Arrays;
+import java.util.HashMap;
 
 /**
  * Post-build step for running tests on AppThwack.
@@ -179,8 +184,104 @@ public class AppThwackRecorder extends Recorder {
 		
 		//Huzzah!
 		LOG(String.format("Congrats! See your test run at %s/%s", DOMAIN, run.toString()));
-		return true;
+
+        //Check for completed test results and download to workspace
+        getTestResults(project, run, workspace);
+
+        return true;
 	}
+
+    /**
+     * Poll for completed test results and unzip to workspace
+     * @param project the test project
+     * @param run the test run
+     * @param ws the Jenkins workspace
+     */
+    private void getTestResults(AppThwackProject project, AppThwackRun run, FilePath ws) {
+        final String API_HOST = "appthwack.com";
+        final String API_RUN = "/api/run/";
+        final String API_SCHEME = "https";
+        final int API_PORT = 443;
+
+        try {
+            LOG(String.format("Waiting for tests to complete: this may take some time"));
+
+            // Poll for test run completion
+            while (!run.getStatus().equalsIgnoreCase("completed")) {
+                Thread.sleep(60000);
+            }
+
+            LOG(String.format("Tests completed: downloading results to workspace"));
+
+            // Make HTTP GET call with Basic Auth to retrieve test results
+            // HttpClient will handle the 303 redirect to AWS
+            HttpHost targetHost = new HttpHost(API_HOST, API_PORT, API_SCHEME);
+            URI uri = new URIBuilder()
+                    .setScheme(API_SCHEME)
+                    .setHost(API_HOST)
+                    .setPath(API_RUN + project.id + "/" + run.id)
+                    .setParameter("format", "archive")
+                    .build();
+            HttpGet httpGet = new HttpGet(uri);
+
+            // Set Basic Auth credentials for AppThwack domain
+            CredentialsProvider credentialsProvider = new BasicCredentialsProvider();
+            credentialsProvider.setCredentials(
+                    new AuthScope(API_HOST, AuthScope.ANY_PORT, AuthScope.ANY_REALM, AuthScope.ANY_SCHEME),
+                    new UsernamePasswordCredentials(getApiKey(), ""));
+            CloseableHttpClient httpClient = HttpClients.custom()
+                    .setDefaultCredentialsProvider(credentialsProvider).build();
+
+            // Create AuthCache instance and add a basic scheme object
+            AuthCache authCache = new BasicAuthCache();
+            BasicScheme basicAuth = new BasicScheme();
+            authCache.put(targetHost, basicAuth);
+
+            // Add AuthCache to the execution context
+            HttpClientContext localContext = HttpClientContext.create();
+            localContext.setAuthCache(authCache);
+
+            // Create the results folder in the workspace
+            FilePath dir = ws.child("device-results-" + run.id );
+            dir.mkdirs();
+
+            // Zip file which holds the device test results
+            FilePath zip = dir.child("results.zip");
+
+            // Download test results via Appthwack API
+            CloseableHttpResponse httpResponse = httpClient.execute(httpGet, localContext);
+            try {
+                HttpEntity entity = httpResponse.getEntity();
+                if (entity != null) {
+                    InputStream inputStream = entity.getContent();
+                    OutputStream outputStream = zip.write();
+                    try {
+                        int read = 0;
+                        byte[] bytes = new byte[1024];
+                        while ((read = inputStream.read(bytes)) != -1) {
+                            outputStream.write(bytes, 0, read);
+                        }
+                    } finally {
+                        inputStream.close();
+                        outputStream.close();
+                    }
+                }
+            } finally {
+                httpResponse.close();
+                httpClient.close();
+            }
+
+            // Unzip and delete the downloaded zip file
+            zip.unzip(dir);
+            zip.delete();
+
+            LOG(String.format("Test results by device are located in: " + dir.getName()));
+
+        } catch (Exception e) {
+            LOG(String.format("Exception reading test results from AppThwack"));
+            e.printStackTrace();
+        }
+    }
 	
 	/**
 	 * Gets a local File instance of a glob file pattern, pulling it from a slave if necessary.
@@ -289,7 +390,7 @@ public class AppThwackRecorder extends Recorder {
 	/**
 	 * Uploads newly built app to AppThwack or returns null on error.
 	 * @param api AppThwackApi instance to use.
-     * @param apk File object of the app to upload.
+     * @param file File object of the app to upload.
      * @return Object representing a remote file stored on AppThwack
 	 */
 	private AppThwackFile uploadFile(AppThwackApi api, File file) {
@@ -550,7 +651,7 @@ public class AppThwackRecorder extends Recorder {
         
     	/**
     	 * Validate the user selected project.
-    	 * @param project
+    	 * @param projectName
     	 * @return
     	 */
         public FormValidation doCheckProjectName(@QueryParameter String projectName) {
@@ -562,7 +663,7 @@ public class AppThwackRecorder extends Recorder {
         
         /**
          * Validate the user selected device pool.
-         * @param pool
+         * @param devicePoolName
          * @return
          */
         public FormValidation doCheckDevicePoolName(@QueryParameter String devicePoolName) {
@@ -574,7 +675,7 @@ public class AppThwackRecorder extends Recorder {
         
         /**
          * Validate the user entered file path to local Calabash features.
-         * @param calabashContent
+         * @param calabashFeatures
          * @return
          */
         public FormValidation doCheckCalabashFeatures(@QueryParameter String calabashFeatures) {
