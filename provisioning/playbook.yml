@@ -1,0 +1,33 @@
+# playbook.yml
+# Created - 02/14/2014
+# Ansible playbook for scatter dev environment.
+
+---
+- hosts: default
+
+  tasks:
+
+    - action: shell whoami
+      register: whoami
+
+    - name: update apt cache
+      apt: update_cache=yes cache_valid_time=3600
+      sudo: yes
+
+    - name: upgrade apt
+      apt: upgrade=yes
+      sudo: yes
+
+    - name: install system packages
+      apt: pkg={{ item }} state=latest
+      sudo: yes
+      with_items:
+        - build-essential
+        - git
+        - htop
+        - tree
+        - curl
+        - wget
+        - diff
+        - maven
+        - openjdk-7-jdk

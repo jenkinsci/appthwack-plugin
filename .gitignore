@@ -9,3 +9,7 @@ target/*
 .settings/*
 .classpath
 .project
+
+# Vagrant
+.vagrant
+vagrant_ansible_inventory_*
