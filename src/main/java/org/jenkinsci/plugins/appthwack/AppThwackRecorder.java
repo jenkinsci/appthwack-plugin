@@ -43,7 +43,7 @@ public class AppThwackRecorder extends Recorder {
 
     private PrintStream log;
 
-    private static final String DOMAIN = "https://appthwack.com";
+    private static final String DOMAIN = "https:// appthwack.com";
 
     private static final String JUNIT_TYPE = "junit";
     private static final String CALABASH_TYPE = "calabash";
@@ -108,31 +108,31 @@ public class AppThwackRecorder extends Recorder {
 
     @Override
     public boolean perform(AbstractBuild build, Launcher launcher, BuildListener listener) throws IOException, InterruptedException {
-        //Build failed earlier in the chain, no need to test.
+        // Build failed earlier in the chain, no need to test.
         if (build.getResult().isWorseOrEqualTo(Result.FAILURE)) {
             return false;
         }
         EnvVars env =  build.getEnvironment(listener);
         log = listener.getLogger();
 
-        //Artifacts location for this build on master.
+        // Artifacts location for this build on master.
         FilePath artifactsDir = new FilePath(build.getArtifactsDir());
 
-        //Workspace (potentially remote if using slave).
+        // Workspace (potentially remote if using slave).
         FilePath workspace = build.getWorkspace();
 
-        //Validate user selection & input values.
+        // Validate user selection & input values.
         boolean isValid = validateConfiguration() && validateTestConfiguration();
         if (!isValid) {
             LOG("Invalid configuration.");
             return false;
         }
 
-        //Create & configure the AppThwackApi client.
+        // Create & configure the AppThwackApi client.
         String apiKey = getApiKey();
         AppThwackApi api = new AppThwackApi(apiKey, DOMAIN);
 
-        //Get AppThwack project from user provided name.
+        // Get AppThwack project from user provided name.
         LOG(String.format("Using Project '%s'", projectName));
         AppThwackProject project = api.getProject(projectName);
         if (project == null) {
@@ -140,7 +140,7 @@ public class AppThwackRecorder extends Recorder {
             return false;
         }
 
-        //Get AppThwack device pool from user provided name.
+        // Get AppThwack device pool from user provided name.
         LOG(String.format("Using DevicePool '%s'", devicePoolName));
         AppThwackDevicePool devicePool = project.getDevicePool(devicePoolName);
         if (devicePool == null) {
@@ -148,14 +148,14 @@ public class AppThwackRecorder extends Recorder {
             return false;
         }
 
-        //Create/Validate app artifact and make local copy.
+        // Create/Validate app artifact and make local copy.
         File appArtifactFile = getArtifactFile(artifactsDir, workspace, env.expand(appArtifact));
         if (appArtifactFile == null || !appArtifactFile.exists()) {
             LOG("Application Artifact not found.");
-            return false;
+            return false;   
         }
 
-        //Upload app.
+        // Upload app.
         LOG(String.format("Using App '%s'", appArtifactFile.getAbsolutePath()));
         AppThwackFile app = uploadFile(api, appArtifactFile);
         if (app == null) {
@@ -163,21 +163,21 @@ public class AppThwackRecorder extends Recorder {
             return false;
         }
 
-        //Upload test content.
+        // Upload test content.
         AppThwackFile tests = uploadTestContent(api, env, artifactsDir, workspace);
         if (tests == null && requiresTestContent(type)) {
             LOG(String.format("Failed to upload required '%s' test content.", type));
             return false;
         }
 
-        //Create test run name.
+        // Create test run name.
         String name = String.format("%s (Jenkins)", appArtifactFile.getName());
 
-        //Schedule the test run.
+        // Schedule the test run.
         LOG(String.format("Scheduling '%s' run '%s'", type, name));
         AppThwackRun run = scheduleTestRun(project, devicePool, type, name, app, tests, env);
 
-        //Huzzah!
+        // Huzzah!
         LOG(String.format("Congrats! See your test run at %s/%s", DOMAIN, run.toString()));
         return true;
     }
@@ -191,20 +191,20 @@ public class AppThwackRecorder extends Recorder {
      */
     public File getArtifactFile(FilePath artifactsDir, FilePath workspace, String pattern) {
         try {
-            //Find glob matches.
+            // Find glob matches.
             FilePath[] matches = workspace.list(pattern);
             if (matches == null || matches.length == 0) {
                 LOG(String.format("No Artifacts found using pattern '%s'", pattern));
                 return null;
             }
-            //Use the first match if multiple found.
+            // Use the first match if multiple found.
             FilePath artifact = matches[0];
             if (matches.length > 1) {
                 LOG(String.format("WARNING: Multiple artifact matches found, defaulting to '%s'", artifact.getName()));
             }
             LOG(String.format("Archiving artifact '%s'", artifact.getName()));
 
-            //Copy file (master or slave) to the build artifact directory on the master.
+            // Copy file (master or slave) to the build artifact directory on the master.
             FilePath localArtifact = new FilePath(artifactsDir, artifact.getName());
             artifact.copyTo(localArtifact);
             return new File(localArtifact.toString());
@@ -233,15 +233,15 @@ public class AppThwackRecorder extends Recorder {
             AppThwackFile tests,
             EnvVars env) {
         try {
-            //JUnit/Robotium Tests
+            // JUnit/Robotium Tests
             if (type.equalsIgnoreCase(JUNIT_TYPE)) {
                 return project.scheduleJUnitRun(app, tests, name, pool, env.expand(junitFilter));
             }
-            //Calabash (Android/iOS) Tests
+            // Calabash (Android/iOS) Tests
             if (type.equalsIgnoreCase(CALABASH_TYPE)) {
                 return project.scheduleCalabashRun(app, tests, name, pool, env.expand(calabashTags));
             }
-            //Built-in Android (AppExplorer + ExerciserMonkey)
+            // Built-in Android (AppExplorer + ExerciserMonkey)
             if (type.equalsIgnoreCase(BUILTIN_ANDROID_TYPE)) {
                 HashMap<String, String> explorerOptions = new HashMap<String, String>();
                 if (eventcount != null && !eventcount.isEmpty() && isNumeric(eventcount)) {
@@ -261,23 +261,23 @@ public class AppThwackRecorder extends Recorder {
                 }
                 return project.scheduleAppExplorerRun(app, name, pool, explorerOptions);
             }
-            //MonkeyTalk (Android)
+            // MonkeyTalk (Android)
             if (type.equalsIgnoreCase(MONKEYTALK_TYPE)) {
                 return project.scheduleMonkeyTalkRun(app, tests, name, pool);
             }
-            //KIF (iOS)
+            // KIF (iOS)
             if (type.equalsIgnoreCase(KIF_TYPE)) {
                 return project.scheduleKIFRun(app, name, pool);
             }
-            //UIA (iOS)
+            // UIA (iOS)
             if (type.equalsIgnoreCase(UIA_TYPE)) {
                 return project.scheduleUIARun(app, tests, name, pool);
             }
-            //Build-in iOS (Monkey)
+            // Build-in iOS (Monkey)
             if (type.equalsIgnoreCase(BUILTIN_IOS_TYPE)) {
                 return project.scheduleBuiltinIOSRun(app, name, pool);
             }
-            //Unknown!
+            // Unknown!
             return null;
         }
         catch (AppThwackException e) {
@@ -313,31 +313,31 @@ public class AppThwackRecorder extends Recorder {
     private AppThwackFile uploadTestContent(AppThwackApi api, EnvVars env, FilePath artifactsDir, FilePath workspace) {
         File tests = null;
 
-        //JUnit/Robotium: Upload tests .apk file.
+        // JUnit/Robotium: Upload tests .apk file.
         if (type.equalsIgnoreCase(JUNIT_TYPE)) {
-            //Get JUnit/Robotium apk from given glob pattern.
+            // Get JUnit/Robotium apk from given glob pattern.
             tests = getArtifactFile(artifactsDir, workspace, env.expand(junitArtifact));
         }
-        //Calabash: Upload features.zip file.
+        // Calabash: Upload features.zip file.
         else if (type.equalsIgnoreCase(CALABASH_TYPE)) {
-            //Get Calabash features.zip from given glob pattern.
+            // Get Calabash features.zip from given glob pattern.
             tests = getArtifactFile(artifactsDir, workspace, env.expand(calabashFeatures));
         }
         else if (type.equalsIgnoreCase(MONKEYTALK_TYPE)) {
-            //Get MonkeyTalk tests (.zip) from given pattern.
+            // Get MonkeyTalk tests (.zip) from given pattern.
             tests = getArtifactFile(artifactsDir, workspace, env.expand(monkeyArtifact));
         }
-        //UIA: Upload tests .js file.
+        // UIA: Upload tests .js file.
         else if (type.equalsIgnoreCase(UIA_TYPE)) {
-            //Get UIA .js file from given glob pattern.
+            // Get UIA .js file from given glob pattern.
             tests = getArtifactFile(artifactsDir, workspace, env.expand(uiaArtifact));
         }
 
-        //Test type has no explicit test artifacts or failed to find them.
+        // Test type has no explicit test artifacts or failed to find them.
         if (tests == null) {
             return null;
         }
-        //Provided valid path but no file exists there.
+        // Provided valid path but no file exists there.
         if (!tests.exists()) {
             LOG(String.format("No test content found at '%s'", tests.getAbsolutePath()));
             return null;
@@ -345,7 +345,7 @@ public class AppThwackRecorder extends Recorder {
 
         LOG(String.format("Using '%s' test content from '%s'", type, tests.getAbsolutePath()));
 
-        //Upload test artifacts to AppThwack.
+        // Upload test artifacts to AppThwack.
         AppThwackFile upload = uploadFile(api, tests);
         if (upload == null) {
             LOG(String.format("Failed to upload test content '%s'", tests.getAbsolutePath()));
@@ -359,28 +359,28 @@ public class AppThwackRecorder extends Recorder {
      * @return
      */
     private boolean validateConfiguration() {
-        //[Required]: API Key
+        // [Required]: API Key
         String apiKey = getApiKey();
         if (apiKey == null || apiKey.isEmpty()) {
             LOG("API Key must be set.");
             return false;
         }
-        //[Required]: Project
+        // [Required]: Project
         if (projectName == null || projectName.isEmpty()) {
             LOG("Project must be set.");
             return false;
         }
-        //[Required]: DevicePool
+        // [Required]: DevicePool
         if (devicePoolName == null || devicePoolName.isEmpty()) {
             LOG("DevicePool must be set.");
             return false;
         }
-        //[Required]: App Artifact
+        // [Required]: App Artifact
         if (appArtifact == null || appArtifact.isEmpty()) {
             LOG("Application Artifact must be set.");
             return false;
         }
-        //[Required]: Type (Radio Block)
+        // [Required]: Type (Radio Block)
         if (type == null || type.isEmpty()) {
             LOG("Test type must be set.");
             return false;
@@ -393,39 +393,39 @@ public class AppThwackRecorder extends Recorder {
      * @return
      */
     private boolean validateTestConfiguration() {
-        //JUnit/Robotium
+        // JUnit/Robotium
         if (type.equalsIgnoreCase(JUNIT_TYPE)) {
-            //[Required]: Tests Artifact
+            // [Required]: Tests Artifact
             if (junitArtifact == null || junitArtifact.isEmpty()) {
                 LOG("Tests Artifact must be set.");
                 return false;
             }
             return true;
         }
-        //Calabash
+        // Calabash
         else if (type.equalsIgnoreCase(CALABASH_TYPE)) {
-            //[Required]: Features Path
+            // [Required]: Features Path
             if (calabashFeatures == null || calabashFeatures.isEmpty()) {
                 LOG("Calabash Features must be set.");
                 return false;
             }
-            //[Required]: Features.zip
+            // [Required]: Features.zip
             if (!calabashFeatures.endsWith(".zip")) {
                 LOG("Calabash content must be of type .zip");
                 return false;
             }
             return true;
         }
-        //Android Built-in
+        // Android Built-in
         else if (type.equalsIgnoreCase(BUILTIN_ANDROID_TYPE)) {
-            //[Optional]: EventCount (int)
+            // [Optional]: EventCount (int)
             if (eventcount != null && !eventcount.isEmpty()) {
                 if (!isNumeric(eventcount)) {
                     LOG("EventCount must be a number.");
                     return false;
                 }
             }
-            //[Optional]: MonkeySeed (int)
+            // [Optional]: MonkeySeed (int)
             if (monkeyseed != null && !monkeyseed.isEmpty()) {
                 if (!isNumeric(monkeyseed)) {
                     LOG("MonkeySeed must be a number.");
@@ -434,7 +434,7 @@ public class AppThwackRecorder extends Recorder {
             }
             return true;
         }
-        //MonkeyTalk
+        // MonkeyTalk
         else if (type.equalsIgnoreCase(MONKEYTALK_TYPE)) {
             if (monkeyArtifact == null || monkeyArtifact.isEmpty()) {
                 LOG("MonkeyTalk Artifact must be set.");
@@ -442,26 +442,26 @@ public class AppThwackRecorder extends Recorder {
             }
             return true;
         }
-        //UIA
+        // UIA
         else if (type.equalsIgnoreCase(UIA_TYPE)) {
-            //[Required]: Tests Artifact
+            // [Required]: Tests Artifact
             if (uiaArtifact == null || uiaArtifact.isEmpty()) {
                 LOG("UIA tests artifact is empty.");
                 return false;
             }
             return true;
         }
-        //KIF
+        // KIF
         else if (type.equalsIgnoreCase(KIF_TYPE)) {
-            //KIF has no configuration options.
+            // KIF has no configuration options.
             return true;
         }
-        //iOS Built-in
+        // iOS Built-in
         else if (type.equalsIgnoreCase(BUILTIN_IOS_TYPE)) {
-            //iOS Built-in has no configuration options.
+            // iOS Built-in has no configuration options.
             return true;
         }
-        //Unknown
+        // Unknown
         LOG(String.format("Invalid test type %s", type));
         return false;
     }
