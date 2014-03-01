@@ -7,7 +7,9 @@ import java.io.PrintStream;
 import java.io.Serializable;
 
 import java.util.Arrays;
+import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.Map;
 import java.util.List;
 import java.util.logging.Logger;
 
@@ -25,6 +27,7 @@ import hudson.tasks.BuildStepMonitor;
 import hudson.tasks.Publisher;
 import hudson.tasks.Recorder;
 import hudson.util.FormValidation;
+import hudson.util.ListBoxModel;
 
 import org.kohsuke.stapler.DataBoundConstructor;
 import org.kohsuke.stapler.QueryParameter;
@@ -50,6 +53,9 @@ public class AppThwackRecorder extends Recorder {
     private static final String MONKEYTALK_TYPE = "monkeytalk";
     private static final String KIF_TYPE = "kif";
     private static final String UIA_TYPE = "uia";
+    private static final String UIAUTO_TYPE = "uiauto";
+    private static final String OCUNIT_TYPE = "ocunit";
+    private static final String XCTEST_TYPE = "xctest";
     private static final String BUILTIN_ANDROID_TYPE = "builtinAndroid";
     private static final String BUILTIN_IOS_TYPE = "builtinIOS";
 
@@ -62,7 +68,11 @@ public class AppThwackRecorder extends Recorder {
     public String junitArtifact;
     public String junitFilter;
     public String monkeyArtifact;
+    public String ocunitArtifact;
     public String uiaArtifact;
+    public String uiautoArtifact;
+    public String uiautoFilter;
+    public String xctestArtifact;
     public String eventcount;
     public String username;
     public String password;
@@ -79,7 +89,11 @@ public class AppThwackRecorder extends Recorder {
             String junitArtifact,
             String junitFilter,
             String monkeyArtifact,
+            String ocunitArtifact,
             String uiaArtifact,
+            String uiautoArtifact,
+            String uiautoFilter,
+            String xctestArtifact,
             String eventcount,
             String username,
             String password,
@@ -94,16 +108,16 @@ public class AppThwackRecorder extends Recorder {
         this.junitArtifact = junitArtifact;
         this.junitFilter = junitFilter;
         this.monkeyArtifact = monkeyArtifact;
+        this.ocunitArtifact = ocunitArtifact;
         this.uiaArtifact = uiaArtifact;
+        this.uiautoArtifact = uiautoArtifact;
+        this.uiautoFilter = uiautoFilter;
+        this.xctestArtifact = xctestArtifact;
         this.eventcount = eventcount;
         this.username = username;
         this.password = password;
         this.launchdata = launchdata;
         this.monkeyseed = monkeyseed;
-    }
-
-    public String getApiKey() {
-        return getDescriptor().apiKey;
     }
 
     @Override
@@ -113,6 +127,7 @@ public class AppThwackRecorder extends Recorder {
             return false;
         }
         EnvVars env =  build.getEnvironment(listener);
+        Map<String, String> parameters = build.getBuildVariables();
         log = listener.getLogger();
 
         // Artifacts location for this build on master.
@@ -129,8 +144,7 @@ public class AppThwackRecorder extends Recorder {
         }
 
         // Create & configure the AppThwackApi client.
-        String apiKey = getApiKey();
-        AppThwackApi api = new AppThwackApi(apiKey, DOMAIN);
+        AppThwackApi api = getAppThwackApi();
 
         // Get AppThwack project from user provided name.
         LOG(String.format("Using Project '%s'", projectName));
@@ -138,6 +152,12 @@ public class AppThwackRecorder extends Recorder {
         if (project == null) {
             LOG(String.format("Project '%s' not found.", projectName));
             return false;
+        }
+
+        // Accept 'APPTHWACK_DEVICE_POOL' build parameter as an overload from job configuration.
+        String devicePoolParameter = parameters.get("APPTHWACK_DEVICE_POOL");
+        if (devicePoolParameter != null) {
+            devicePoolName = devicePoolParameter;
         }
 
         // Get AppThwack device pool from user provided name.
@@ -233,13 +253,17 @@ public class AppThwackRecorder extends Recorder {
             AppThwackFile tests,
             EnvVars env) {
         try {
-            // JUnit/Robotium Tests
+            // JUnit/Robotium/Espresso Tests
             if (type.equalsIgnoreCase(JUNIT_TYPE)) {
                 return project.scheduleJUnitRun(app, tests, name, pool, env.expand(junitFilter));
             }
             // Calabash (Android/iOS) Tests
             if (type.equalsIgnoreCase(CALABASH_TYPE)) {
                 return project.scheduleCalabashRun(app, tests, name, pool, env.expand(calabashTags));
+            }
+            // UI Automator (Android) Tests
+            if (type.equalsIgnoreCase(UIAUTO_TYPE)) {
+                return project.scheduleUIAutomatorRun(app, tests, name, pool, env.expand(uiautoFilter));
             }
             // Built-in Android (AppExplorer + ExerciserMonkey)
             if (type.equalsIgnoreCase(BUILTIN_ANDROID_TYPE)) {
@@ -277,6 +301,14 @@ public class AppThwackRecorder extends Recorder {
             if (type.equalsIgnoreCase(BUILTIN_IOS_TYPE)) {
                 return project.scheduleBuiltinIOSRun(app, name, pool);
             }
+            // OCUnit (iOS)
+            if (type.equalsIgnoreCase(OCUNIT_TYPE)) {
+                return project.scheduleOCUnitRun(app, tests, name, pool);
+            }
+            // XCTest (iOS)
+            if (type.equalsIgnoreCase(XCTEST_TYPE)) {
+                return project.scheduleXCTestRun(app, tests, name, pool);
+            }
             // Unknown!
             return null;
         }
@@ -303,7 +335,7 @@ public class AppThwackRecorder extends Recorder {
     }
 
     /**
-     * Upload JUnit/Robotium test app or Calabash scripts to AppThwack.
+     * Upload JUnit/Robotium/Espresso test app or Calabash scripts to AppThwack.
      * @param api AppThwackApi instance to use.
      * @param env Environment variables for the current job.
      * @param artifactsDir artifacts path on master for this build
@@ -313,7 +345,7 @@ public class AppThwackRecorder extends Recorder {
     private AppThwackFile uploadTestContent(AppThwackApi api, EnvVars env, FilePath artifactsDir, FilePath workspace) {
         File tests = null;
 
-        // JUnit/Robotium: Upload tests .apk file.
+        // JUnit/Robotium/Espresso: Upload tests .apk file.
         if (type.equalsIgnoreCase(JUNIT_TYPE)) {
             // Get JUnit/Robotium apk from given glob pattern.
             tests = getArtifactFile(artifactsDir, workspace, env.expand(junitArtifact));
@@ -323,14 +355,29 @@ public class AppThwackRecorder extends Recorder {
             // Get Calabash features.zip from given glob pattern.
             tests = getArtifactFile(artifactsDir, workspace, env.expand(calabashFeatures));
         }
+        // MonkeyTalk: Upload tests .zip file.
         else if (type.equalsIgnoreCase(MONKEYTALK_TYPE)) {
-            // Get MonkeyTalk tests (.zip) from given pattern.
+            // Get MonkeyTalk tests (.zip) from given glob pattern.
             tests = getArtifactFile(artifactsDir, workspace, env.expand(monkeyArtifact));
+        }
+        else if (type.equalsIgnoreCase(UIAUTO_TYPE)) {
+            // Get UI Automator tests (.jar) from given glob pattern.
+            tests = getArtifactFile(artifactsDir, workspace, env.expand(uiautoArtifact));
         }
         // UIA: Upload tests .js file.
         else if (type.equalsIgnoreCase(UIA_TYPE)) {
             // Get UIA .js file from given glob pattern.
             tests = getArtifactFile(artifactsDir, workspace, env.expand(uiaArtifact));
+        }
+        // OCUnit: Upload tests .zip file.
+        else if (type.equalsIgnoreCase(OCUNIT_TYPE)) {
+            // Get OCUnit .zip file from given glob pattern.
+            tests = getArtifactFile(artifactsDir, workspace, env.expand(ocunitArtifact));
+        }
+        // XCTest: Upload tests .zip file.
+        else if (type.equalsIgnoreCase(XCTEST_TYPE)) {
+            // Get XCTest .zip file from given glob pattern.
+            tests = getArtifactFile(artifactsDir, workspace, env.expand(xctestArtifact));
         }
 
         // Test type has no explicit test artifacts or failed to find them.
@@ -397,7 +444,7 @@ public class AppThwackRecorder extends Recorder {
         if (type.equalsIgnoreCase(JUNIT_TYPE)) {
             // [Required]: Tests Artifact
             if (junitArtifact == null || junitArtifact.isEmpty()) {
-                LOG("Tests Artifact must be set.");
+                LOG("JUnit tests Artifact must be set.");
                 return false;
             }
             return true;
@@ -437,7 +484,15 @@ public class AppThwackRecorder extends Recorder {
         // MonkeyTalk
         else if (type.equalsIgnoreCase(MONKEYTALK_TYPE)) {
             if (monkeyArtifact == null || monkeyArtifact.isEmpty()) {
-                LOG("MonkeyTalk Artifact must be set.");
+                LOG("MonkeyTalk tests artifact must be set.");
+                return false;
+            }
+            return true;
+        }
+        // UI Automator
+        else if (type.equalsIgnoreCase(UIAUTO_TYPE)) {
+            if (uiautoArtifact == null || uiautoArtifact.isEmpty()) {
+                LOG("UI Automator tests artifact must be set.");
                 return false;
             }
             return true;
@@ -447,6 +502,22 @@ public class AppThwackRecorder extends Recorder {
             // [Required]: Tests Artifact
             if (uiaArtifact == null || uiaArtifact.isEmpty()) {
                 LOG("UIA tests artifact is empty.");
+                return false;
+            }
+            return true;
+        }
+        // OCUnit
+        else if (type.equalsIgnoreCase(OCUNIT_TYPE)) {
+            if (ocunitArtifact == null || ocunitArtifact.isEmpty()) {
+                LOG("OCUnit tests artifact must be set.");
+                return false;
+            }
+            return true;
+        }
+        // XC Test
+        else if (type.equalsIgnoreCase(XCTEST_TYPE)) {
+            if (xctestArtifact == null || xctestArtifact.isEmpty()) {
+                LOG("XCTest tests artifact must be set.");
                 return false;
             }
             return true;
@@ -508,6 +579,14 @@ public class AppThwackRecorder extends Recorder {
         return (this.type.equalsIgnoreCase(type)) ? "true" : "";
     }
 
+    public String getApiKey() {
+        return getDescriptor().apiKey;
+    }
+
+    public AppThwackApi getAppThwackApi() {
+        return getDescriptor().getAppThwackApi();
+    }
+
     @Override
     public DescriptorImpl getDescriptor() {
         return (DescriptorImpl)super.getDescriptor();
@@ -531,9 +610,27 @@ public class AppThwackRecorder extends Recorder {
     public static final class DescriptorImpl extends BuildStepDescriptor<Publisher> {
 
         public String apiKey;
+        private AppThwackApi api;
+
+        private Map<String, AppThwackProject> projectsCache = new HashMap<String, AppThwackProject>();
+        private Map<String, List<AppThwackDevicePool>> poolsCache = new HashMap<String, List<AppThwackDevicePool>>();
 
         public DescriptorImpl() {
             load();
+        }
+
+        /**
+         * Return configured instance of the AppThwackApi using API Key from global configuration.
+         * @return
+         */
+        public AppThwackApi getAppThwackApi() {
+            if (api == null) {
+                if (apiKey == null || apiKey.isEmpty()) {
+                    return null;
+                }
+                api = new AppThwackApi(apiKey);
+            }
+            return api;
         }
 
         /**
@@ -596,6 +693,9 @@ public class AppThwackRecorder extends Recorder {
                     BUILTIN_ANDROID_TYPE,
                     KIF_TYPE,
                     UIA_TYPE,
+                    UIAUTO_TYPE,
+                    OCUNIT_TYPE,
+                    XCTEST_TYPE,
                     BUILTIN_IOS_TYPE).contains(type);
 
             if (!isKnownType) {
@@ -668,6 +768,101 @@ public class AppThwackRecorder extends Recorder {
                 return FormValidation.error("Required");
             }
             return FormValidation.ok();
+        }
+
+        /**
+         * Refresh button clicked, clear the project and device pool caches
+         * so the next click on the drop-down will get fresh content from the API.
+         * @return
+         */
+        public FormValidation doRefresh() {
+            if (apiKey == null || apiKey.isEmpty()) {
+                return FormValidation.error("AppThwack API Key must be set!");
+            }
+            // Clear local caches
+            projectsCache.clear();
+            poolsCache.clear();
+            return FormValidation.ok();
+        }
+
+        /**
+         * Populate the project drop-down from the AppThwack API or local cache.
+         * @return
+         */
+        public ListBoxModel doFillProjectNameItems(@QueryParameter String projectName) {
+            // Create ListBoxModel from all projects for this AppThwack account.
+            List<ListBoxModel.Option> entries = new ArrayList<ListBoxModel.Option>();
+            Map<String, AppThwackProject> projects = getAppThwackProjects();
+            if (projects == null) {
+                return new ListBoxModel();
+            }
+            for (AppThwackProject project : projects.values()) {
+                entries.add(new ListBoxModel.Option(project.name, project.name, project.name == projectName));
+            }
+            return new ListBoxModel(entries);
+        }
+
+        /**
+         * Populate the device pool drop-down from AppThwack API or local cache.
+         * based on the selected project.
+         * @param projectName
+         * @param devicePoolName
+         * @return
+         */
+        public ListBoxModel doFillDevicePoolNameItems(@QueryParameter String projectName, @QueryParameter String devicePoolName) {
+            List<ListBoxModel.Option> entries = new ArrayList<ListBoxModel.Option>();
+            List<AppThwackDevicePool> devicePools = getAppThwackDevicePools(projectName);
+            if (devicePools == null) {
+                return new ListBoxModel();
+            }
+            for (AppThwackDevicePool pool : devicePools) {
+                entries.add(new ListBoxModel.Option(pool.name, pool.name, pool.name == devicePoolName));
+            }
+            return new ListBoxModel(entries);
+        }
+
+        /**
+         * Get all projects for the AppThwack account tied to the API Key
+         * and store them in a local cache.
+         * @return
+         */
+        private synchronized Map<String, AppThwackProject> getAppThwackProjects() {
+            if (!projectsCache.isEmpty()) {
+                return projectsCache;
+            }
+            AppThwackApi api = getAppThwackApi();
+            if (api == null) {
+                return null;
+            }
+            List<AppThwackProject> projects = api.getProjects();
+            for (AppThwackProject project : projects) {
+                projectsCache.put(project.name.toString(), project);
+            }
+            return projectsCache;
+        }
+
+        /**
+         * Get all device pools for the selected project and store them
+         * in a local cache.
+         * @param project
+         * @return
+         */
+        private List<AppThwackDevicePool> getAppThwackDevicePools(String project) {
+            List<AppThwackDevicePool> pools = poolsCache.get(project);
+            if (pools != null) {
+                return pools;
+            }
+            Map<String, AppThwackProject> projects = getAppThwackProjects();
+            if (projects == null) {
+                return null;
+            }
+            AppThwackProject p = projects.get(project);
+            if (p == null) {
+                return null;
+            }
+            pools = p.getDevicePools();
+            poolsCache.put(project, pools);
+            return pools;
         }
 
         /**

@@ -1,13 +1,15 @@
 <j:jelly xmlns:j="jelly:core" xmlns:st="jelly:stapler" xmlns:d="jelly:define" xmlns:l="/lib/layout" xmlns:t="/lib/hudson" xmlns:f="/lib/form">
 
-  <f:entry title="Project" field="projectName" description="[Required] Name of AppThwack project.">
-    <f:textbox />
+  <f:validateButton title="refresh" method="refresh" progress="Checking..." inline="true" />
+
+  <f:entry title="Project" field="projectName" description="[Required] Select your AppThwack project.">
+    <f:select style="width:100%; padding-right:5px; margin-right:5px" inline="true" />
   </f:entry>
 
-  <f:entry title="Device Pool" field="devicePoolName" description="[Required] Name of AppThwack device pool.">
-    <f:textbox />
+  <f:entry title="Device Pool" field="devicePoolName" description="[Required] Select your AppThwack device pool.">
+    <f:select style="width:100%" inline="true"/>
   </f:entry>
-  
+
   <f:entry title="Application" field="appArtifact" description="[Required] Pattern to find newly built application.">
     <f:textbox />
   </f:entry>
@@ -44,9 +46,9 @@
         </f:entry>
       </f:nested>
     </f:radioBlock>
-    <f:radioBlock name="type" value="junit" title="JUnit/Robotium" checked="${instance.isType('junit')}" inline="true">
+    <f:radioBlock name="type" value="junit" title="JUnit/Robotium/Espresso" checked="${instance.isType('junit')}" inline="true">
       <f:nested>
-        <f:entry title="Tests" field="junitArtifact" description="[Required] Pattern to find JUnit tests.">
+        <f:entry title="Tests" field="junitArtifact" description="[Required] Pattern to find JUnit/Robotium/Espresso tests.">
           <f:textbox />
         </f:entry>
         <f:entry title="Filter" field="junitFilter" description="[Optional] Filter specific TestCase/TestSuite to run.">
@@ -63,13 +65,37 @@
         </f:entry>
       </f:nested>
     </f:radioBlock>
-    <f:radioBlock name="type" value="uia" title="UIA" checked="${instance.isType('uia')}" inline="true">
+    <f:radioBlock name="type" value="ocunit" title="OCUnit" checked="${instance.isType('ocunit')}" inline="true">
+      <f:nested>
+        <f:entry title="Tests" field="ocunitArtifact" description="[Required] Pattern to find OCUnit tests.">
+          <f:textbox />
+        </f:entry>
+      </f:nested>
+    </f:radioBlock>
+    <f:radioBlock name="type" value="uia" title="UI Automation" checked="${instance.isType('uia')}" inline="true">
      <f:nested>
-       <f:entry title="Tests" field="uiaArtifact" description="[Required] Pattern to find UIA tests.">
+       <f:entry title="Tests" field="uiaArtifact" description="[Required] Pattern to find UI Automation tests.">
          <f:textbox />
        </f:entry>
      </f:nested>
     </f:radioBlock>
+    <f:radioBlock name="type" value="uiauto" title="UI Automator" checked="${instance.isType('uiauto')}" inline="true">
+     <f:nested>
+       <f:entry title="Tests" field="uiautoArtifact" description="[Required] Pattern to find UI Automator tests.">
+         <f:textbox />
+       </f:entry>
+       <f:entry title="Filter" field="uiautoFilter" description="[Optional] Filter specific TestCase/TestSuite to run.">
+         <f:textbox />
+       </f:entry>
+     </f:nested>
+    </f:radioBlock>
+    <f:radioBlock name="type" value="xctest" title="XCTest" checked="${instance.isType('xctest')}" inline="true">
+      <f:nested>
+        <f:entry title="Tests" field="xctestArtifact" description="[Required] Pattern to find XCTest tests.">
+          <f:textbox />
+        </f:entry>
+      </f:nested>
+    </f:radioBlock>
   </f:section>
-  
+
 </j:jelly>
