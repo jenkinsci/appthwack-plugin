@@ -1,6 +1,6 @@
-.PHONY: clean compile install debug
+.PHONY: clean compile install debug release
 
-all: clean compile install debug
+all: clean compile install debug release
 
 clean:
 	mvn clean
@@ -13,3 +13,6 @@ install: clean
 
 debug: install
 	mvn hpi:run -Dskiptests
+
+release:
+	mvn release:clean release:prepare release:perform
