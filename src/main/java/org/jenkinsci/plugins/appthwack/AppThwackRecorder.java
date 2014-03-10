@@ -7,9 +7,7 @@ import java.io.PrintStream;
 import java.io.Serializable;
 
 import java.util.Arrays;
-import java.util.ArrayList;
 import java.util.HashMap;
-import java.util.Map;
 import java.util.List;
 import java.util.logging.Logger;
 
@@ -21,21 +19,37 @@ import hudson.model.AbstractBuild;
 import hudson.model.AbstractProject;
 import hudson.model.BuildListener;
 import hudson.model.Result;
-import hudson.remoting.VirtualChannel;
 import hudson.tasks.BuildStepDescriptor;
 import hudson.tasks.BuildStepMonitor;
 import hudson.tasks.Publisher;
 import hudson.tasks.Recorder;
 import hudson.util.FormValidation;
-import hudson.util.ListBoxModel;
-
+import net.sf.json.JSONObject;
+import org.apache.http.HttpEntity;
+import org.apache.http.HttpHost;
+import org.apache.http.auth.AuthScope;
+import org.apache.http.auth.UsernamePasswordCredentials;
+import org.apache.http.client.AuthCache;
+import org.apache.http.client.CredentialsProvider;
+import org.apache.http.client.methods.CloseableHttpResponse;
+import org.apache.http.client.methods.HttpGet;
+import org.apache.http.client.protocol.HttpClientContext;
+import org.apache.http.client.utils.URIBuilder;
+import org.apache.http.impl.auth.BasicScheme;
+import org.apache.http.impl.client.BasicAuthCache;
+import org.apache.http.impl.client.BasicCredentialsProvider;
+import org.apache.http.impl.client.CloseableHttpClient;
+import org.apache.http.impl.client.HttpClients;
 import org.kohsuke.stapler.DataBoundConstructor;
 import org.kohsuke.stapler.QueryParameter;
 import org.kohsuke.stapler.StaplerRequest;
 
-import net.sf.json.JSONObject;
-
 import com.appthwack.appthwack.*;
+
+import java.io.*;
+import java.net.URI;
+import java.util.Arrays;
+import java.util.HashMap;
 
 /**
  * Post-build step for running tests on AppThwack.
@@ -199,6 +213,9 @@ public class AppThwackRecorder extends Recorder {
 
         // Huzzah!
         LOG(String.format("Congrats! See your test run at %s/%s", DOMAIN, run.toString()));
+
+        // Check for completed test results and download to workspace
+        getTestResults(project, run, workspace);
         return true;
     }
 
@@ -644,12 +661,12 @@ public class AppThwackRecorder extends Recorder {
             }
             return FormValidation.ok();
         }
-
-        /**
-         * Validate the user selected project.
-         * @param project
-         * @return
-         */
+        
+    	/**
+    	 * Validate the user selected project.
+    	 * @param projectName
+    	 * @return
+    	 */
         public FormValidation doCheckProjectName(@QueryParameter String projectName) {
             if (projectName == null || projectName.isEmpty()) {
                 return FormValidation.error("Required!");
@@ -659,7 +676,7 @@ public class AppThwackRecorder extends Recorder {
 
         /**
          * Validate the user selected device pool.
-         * @param pool
+         * @param devicePoolName
          * @return
          */
         public FormValidation doCheckDevicePoolName(@QueryParameter String devicePoolName) {
@@ -671,7 +688,7 @@ public class AppThwackRecorder extends Recorder {
 
         /**
          * Validate the user entered file path to local Calabash features.
-         * @param calabashContent
+         * @param calabashFeatures
          * @return
          */
         public FormValidation doCheckCalabashFeatures(@QueryParameter String calabashFeatures) {
