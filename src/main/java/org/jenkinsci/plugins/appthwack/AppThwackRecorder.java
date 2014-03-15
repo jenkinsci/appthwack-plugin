@@ -257,7 +257,6 @@ public class AppThwackRecorder extends Recorder {
     public FilePath getResultsArchive(AppThwackRun run, FilePath resultsDir) {
         try {
             // Download results archive which saves it into a system temp file.
-            Thread.sleep(60*1000);
             FilePath tmpArchive = new FilePath(run.downloadResults());
             if (tmpArchive == null) {
                 return null;
