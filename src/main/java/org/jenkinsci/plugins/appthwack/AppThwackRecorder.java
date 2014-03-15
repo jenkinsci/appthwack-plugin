@@ -659,7 +659,7 @@ public class AppThwackRecorder extends Recorder {
     @Override
     public DescriptorImpl getDescriptor() {
         return (DescriptorImpl)super.getDescriptor();
-    }\
+    }
 
     /**
      * In a concurrent environment, this MUST run after the has completed.
