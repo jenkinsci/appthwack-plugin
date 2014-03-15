@@ -11,12 +11,14 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.List;
+import java.util.Collection;
 import java.util.logging.Logger;
 
 import hudson.EnvVars;
 import hudson.Extension;
 import hudson.FilePath;
 import hudson.Launcher;
+import hudson.model.Action;
 import hudson.model.AbstractBuild;
 import hudson.model.AbstractProject;
 import hudson.model.BuildListener;
@@ -46,7 +48,8 @@ public class AppThwackRecorder extends Recorder {
 
     private PrintStream log;
 
-    private static final String DOMAIN = "https:// appthwack.com";
+    private static final String DOMAIN = "https://appthwack.com";
+    private static final HashMap<String, Result> resultMap = new HashMap<String, Result>();
 
     private static final String JUNIT_TYPE = "junit";
     private static final String CALABASH_TYPE = "calabash";
@@ -78,6 +81,13 @@ public class AppThwackRecorder extends Recorder {
     public String password;
     public String launchdata;
     public String monkeyseed;
+
+    static {
+        resultMap.put("pass", Result.SUCCESS);
+        resultMap.put("fail", Result.FAILURE);
+        resultMap.put("warning", Result.UNSTABLE);
+        resultMap.put("error", Result.FAILURE);
+    }
 
     @DataBoundConstructor
     public AppThwackRecorder(String projectName,
@@ -135,6 +145,9 @@ public class AppThwackRecorder extends Recorder {
 
         // Workspace (potentially remote if using slave).
         FilePath workspace = build.getWorkspace();
+
+        // Run root location for this build on master.
+        FilePath root = new FilePath(build.getRootDir());
 
         // Validate user selection & input values.
         boolean isValid = validateConfiguration() && validateTestConfiguration();
@@ -198,8 +211,66 @@ public class AppThwackRecorder extends Recorder {
         AppThwackRun run = scheduleTestRun(project, devicePool, type, name, app, tests, env);
 
         // Huzzah!
-        LOG(String.format("Congrats! See your test run at %s/%s", DOMAIN, run.toString()));
+        LOG(String.format("Congrats! Run scheduled and visible at %s/%s", DOMAIN, run.toString()));
+
+        // Wait for test run to complete before downloading/processing results.
+        LOG("Waiting for test run to complete.");
+        AppThwackResult result = run.waitForCompleted();
+        if (run == null) {
+            LOG("Error while waiting for run to complete.");
+            return false;
+        }
+        LOG(String.format("AppThwack run %d completed with result %s!", run.id, result.summary.result));
+
+        // Create results directory where we'll download/extract the archive.
+        FilePath resultsDir = root.child(String.format("appthwack-results-%s", run.id.toString()));
+        resultsDir.mkdirs();
+        LOG(String.format("Storing AppThwack results in %s", resultsDir));
+
+        // Download results archive and store it.
+        LOG("Downloading results archive");
+        FilePath archive = getResultsArchive(run, resultsDir);
+        if (archive == null) {
+            LOG(String.format("Failed to download results archive for run %s", run.id.toString()));
+            return false;
+        }
+        LOG(String.format("Storing results archive in %s", archive.getName()));
+
+        // Extract the archive into our results directory.
+        archive.unzip(resultsDir);
+        LOG(String.format("Extracted results archive to directory %s", resultsDir.getName()));
+
+        // Set build result based on AppThwack test result.
+        Result buildResult = resultMap.get(result.summary.result);
+        build.setResult(buildResult);
+
         return true;
+    }
+
+    /**
+     * Return FilePath within Jenkins run directory where the AppThwack results
+     * archive is stored.
+     * @param run AppThwack run we're downloading the results of
+     * @param resultsDir AppThwack results directory unique to the current run
+     * @return
+     */
+    public FilePath getResultsArchive(AppThwackRun run, FilePath resultsDir) {
+        try {
+            // Download results archive which saves it into a system temp file.
+            Thread.sleep(60*1000);
+            FilePath tmpArchive = new FilePath(run.downloadResults());
+            if (tmpArchive == null) {
+                return null;
+            }
+            // Copy from temp file into our results directory, pulling from remote slave if necessary.
+            FilePath localArchive = resultsDir.child(String.format("results-%s.zip", run.id.toString()));
+            tmpArchive.copyTo(localArchive);
+            return localArchive;
+        }
+        catch (Exception e) {
+            LOG(String.format("Unable to download results archive for run %s. %s", run.toString(), e.toString()));
+            return null;
+        }
     }
 
     /**
@@ -590,6 +661,11 @@ public class AppThwackRecorder extends Recorder {
     @Override
     public DescriptorImpl getDescriptor() {
         return (DescriptorImpl)super.getDescriptor();
+    }
+
+    @Override
+    public Collection<Action> getProjectActions(AbstractProject<?, ?> project) {
+        return new ArrayList<Action>(Arrays.asList(new AppThwackProjectAction(project)));
     }
 
     /**
