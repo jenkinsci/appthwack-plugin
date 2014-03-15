@@ -659,12 +659,7 @@ public class AppThwackRecorder extends Recorder {
     @Override
     public DescriptorImpl getDescriptor() {
         return (DescriptorImpl)super.getDescriptor();
-    }
-
-    @Override
-    public Collection<Action> getProjectActions(AbstractProject<?, ?> project) {
-        return new ArrayList<Action>(Arrays.asList(new AppThwackProjectAction(project)));
-    }
+    }\
 
     /**
      * In a concurrent environment, this MUST run after the has completed.
