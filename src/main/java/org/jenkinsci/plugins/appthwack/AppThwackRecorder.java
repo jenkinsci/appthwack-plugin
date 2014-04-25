@@ -13,7 +13,7 @@ import java.util.Map;
 import java.util.List;
 import java.util.Collection;
 import java.util.logging.Logger;
-
+import hudson.model.Result;
 import hudson.EnvVars;
 import hudson.Extension;
 import hudson.FilePath;
@@ -22,7 +22,6 @@ import hudson.model.Action;
 import hudson.model.AbstractBuild;
 import hudson.model.AbstractProject;
 import hudson.model.BuildListener;
-import hudson.model.Result;
 import hudson.remoting.VirtualChannel;
 import hudson.tasks.BuildStepDescriptor;
 import hudson.tasks.BuildStepMonitor;
@@ -47,9 +46,6 @@ import com.appthwack.appthwack.*;
 public class AppThwackRecorder extends Recorder {
 
     private PrintStream log;
-
-    private static final String DOMAIN = "https://appthwack.com";
-    private static final HashMap<String, Result> resultMap = new HashMap<String, Result>();
 
     private static final String JUNIT_TYPE = "junit";
     private static final String CALABASH_TYPE = "calabash";
@@ -81,13 +77,6 @@ public class AppThwackRecorder extends Recorder {
     public String password;
     public String launchdata;
     public String monkeyseed;
-
-    static {
-        resultMap.put("pass", Result.SUCCESS);
-        resultMap.put("fail", Result.FAILURE);
-        resultMap.put("warning", Result.UNSTABLE);
-        resultMap.put("error", Result.FAILURE);
-    }
 
     @DataBoundConstructor
     public AppThwackRecorder(String projectName,
@@ -159,6 +148,13 @@ public class AppThwackRecorder extends Recorder {
         // Create & configure the AppThwackApi client.
         AppThwackApi api = getAppThwackApi();
 
+        // Accept 'APPTHWACK_PROJECT' build parameter as an overload from job configuration.
+        String projectNameParameter = parameters.get("APPTHWACK_PROJECT");
+        if (projectNameParameter != null && !projectNameParameter.isEmpty()) {
+            LOG(String.format("Using overloaded project '%s' from build parameters", projectNameParameter));
+            projectName = projectNameParameter;
+        }
+
         // Get AppThwack project from user provided name.
         LOG(String.format("Using Project '%s'", projectName));
         AppThwackProject project = api.getProject(projectName);
@@ -170,6 +166,7 @@ public class AppThwackRecorder extends Recorder {
         // Accept 'APPTHWACK_DEVICE_POOL' build parameter as an overload from job configuration.
         String devicePoolParameter = parameters.get("APPTHWACK_DEVICE_POOL");
         if (devicePoolParameter != null) {
+            LOG(String.format("Using overloaded device pool '%s' from build parameters", devicePoolParameter));
             devicePoolName = devicePoolParameter;
         }
 
@@ -185,7 +182,7 @@ public class AppThwackRecorder extends Recorder {
         File appArtifactFile = getArtifactFile(artifactsDir, workspace, env.expand(appArtifact));
         if (appArtifactFile == null || !appArtifactFile.exists()) {
             LOG("Application Artifact not found.");
-            return false;   
+            return false;
         }
 
         // Upload app.
@@ -211,38 +208,40 @@ public class AppThwackRecorder extends Recorder {
         AppThwackRun run = scheduleTestRun(project, devicePool, type, name, app, tests, env);
 
         // Huzzah!
-        LOG(String.format("Congrats! Run scheduled and visible at %s/%s", DOMAIN, run.toString()));
+        LOG(String.format("Congrats! Run scheduled and available at %s", run.getWebUrl()));
 
-        // Wait for test run to complete before downloading/processing results.
+        // Attach AppThwack action to poll periodically and update results UI.
+        AppThwackTestResultAction action = new AppThwackTestResultAction(build, log);
+        build.addAction(action);
+
+        // Wait for test result to complete will updating status periodically.
         LOG("Waiting for test run to complete.");
-        AppThwackResult result = run.waitForCompleted();
-        if (run == null) {
-            LOG("Error while waiting for run to complete.");
-            return false;
-        }
-        LOG(String.format("AppThwack run %d completed with result %s!", run.id, result.summary.result));
+        action.waitForRunCompletion(run);
 
-        // Create results directory where we'll download/extract the archive.
-        FilePath resultsDir = root.child(String.format("appthwack-results-%s", run.id.toString()));
+        // Run complete, grab and process the results.
+        AppThwackTestResult result = action.getResult();
+        LOG(String.format("AppThwack run %d completed %d tests", run.id, result.getTotalCount()));
+
+        // Create results storage directory which will contain the unzip logs/screenshots pulled from AppThwack.
+        FilePath resultsDir = new FilePath(artifactsDir, String.format("appthwack-results-%d", run.id));
         resultsDir.mkdirs();
-        LOG(String.format("Storing AppThwack results in %s", resultsDir));
+        LOG(String.format("Storing AppThwack results in directory %s", resultsDir));
 
         // Download results archive and store it.
-        LOG("Downloading results archive");
-        FilePath archive = getResultsArchive(run, resultsDir);
+        LOG("Downloading AppThwack results archive...");
+        FilePath archive = getResultsArchive(run, artifactsDir);
         if (archive == null) {
-            LOG(String.format("Failed to download results archive for run %s", run.id.toString()));
+            LOG("Failed to download results archive!");
             return false;
         }
-        LOG(String.format("Storing results archive in %s", archive.getName()));
+        LOG(String.format("Results archive saved in %s", archive.getName()));
 
-        // Extract the archive into our results directory.
+        // Extract results archive into results directory.
         archive.unzip(resultsDir);
         LOG(String.format("Extracted results archive to directory %s", resultsDir.getName()));
 
-        // Set build result based on AppThwack test result.
-        Result buildResult = resultMap.get(result.summary.result);
-        build.setResult(buildResult);
+        // Set Jenkins build result based on AppThwack test result.
+        build.setResult(action.getBuildResult());
 
         return true;
     }
@@ -251,18 +250,18 @@ public class AppThwackRecorder extends Recorder {
      * Return FilePath within Jenkins run directory where the AppThwack results
      * archive is stored.
      * @param run AppThwack run we're downloading the results of
-     * @param resultsDir AppThwack results directory unique to the current run
+     * @param archiveDir AppThwack archive directory for this run
      * @return
      */
-    public FilePath getResultsArchive(AppThwackRun run, FilePath resultsDir) {
+    public FilePath getResultsArchive(AppThwackRun run, FilePath archiveDir) {
         try {
             // Download results archive which saves it into a system temp file.
             FilePath tmpArchive = new FilePath(run.downloadResults());
             if (tmpArchive == null) {
                 return null;
             }
-            // Copy from temp file into our results directory, pulling from remote slave if necessary.
-            FilePath localArchive = resultsDir.child(String.format("results-%s.zip", run.id.toString()));
+            // Copy from temp file into our artifact directory, pulling from remote slave if necessary.
+            FilePath localArchive = archiveDir.child(String.format("results-%s.zip", run.id.toString()));
             tmpArchive.copyTo(localArchive);
             return localArchive;
         }
@@ -662,6 +661,11 @@ public class AppThwackRecorder extends Recorder {
         return (DescriptorImpl)super.getDescriptor();
     }
 
+    /**
+     * Return collection of all Jenkins actions to be attached to this project.
+     * @param project
+     * @return
+     */
     @Override
     public Collection<Action> getProjectActions(AbstractProject<?, ?> project) {
         return new ArrayList<Action>(Arrays.asList(new AppThwackProjectAction(project)));
@@ -685,7 +689,7 @@ public class AppThwackRecorder extends Recorder {
     public static final class DescriptorImpl extends BuildStepDescriptor<Publisher> {
 
         public String apiKey;
-        private AppThwackApi api;
+        private transient AppThwackApi api;
 
         private Map<String, AppThwackProject> projectsCache = new HashMap<String, AppThwackProject>();
         private Map<String, List<AppThwackDevicePool>> poolsCache = new HashMap<String, List<AppThwackDevicePool>>();
