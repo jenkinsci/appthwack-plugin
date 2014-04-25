@@ -1,0 +1,34 @@
+<j:jelly xmlns:j="jelly:core" xmlns:st="jelly:stapler" xmlns:d="jelly:define" xmlns:l="/lib/layout" xmlns:t="/lib/hudson" xmlns:f="/lib/form" xmlns:r="/org/jenkinsci/plugins/appthwack/results">
+  <style type="text/css">
+    .project-summary-table {
+      border-collapse: separate;
+      border-spacing: 5;
+    }
+  </style>
+  <table style="margin-top: 1em; margin-left: 1em;">
+    <t:summary icon="/plugin/appthwack/thwack-large.png">
+      <h4>Recent AppThwack Results</h4>
+      <j:choose>
+        <j:set var="actions" value="${it.getLastBuildActions(5)}" />
+        <j:when test="${!actions.isEmpty()}">
+          <table class="project-summary-table">
+            <tr>
+              <th>Status</th>
+              <th>ID</th>
+              <th>Project</th>
+              <th>Minutes</th>
+              <th>Pass/Warn/Fail</th>
+              <th>Web Report</th>
+            </tr>
+            <j:forEach var="action" items="${actions}">
+              <r:project-run-summary result="${action.result}" />
+            </j:forEach>
+          </table>
+        </j:when>
+        <j:otherwise>
+          <p>No results available</p>
+        </j:otherwise>
+      </j:choose>
+    </t:summary>
+  </table>
+</j:jelly>
