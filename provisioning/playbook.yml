@@ -31,3 +31,5 @@
         - diff
         - maven
         - openjdk-7-jdk
+        - gnupg
+        - rng-tools
