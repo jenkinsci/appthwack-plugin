@@ -689,7 +689,6 @@ public class AppThwackRecorder extends Recorder {
     public static final class DescriptorImpl extends BuildStepDescriptor<Publisher> {
 
         public String apiKey;
-        private transient AppThwackApi api;
 
         private Map<String, AppThwackProject> projectsCache = new HashMap<String, AppThwackProject>();
         private Map<String, List<AppThwackDevicePool>> poolsCache = new HashMap<String, List<AppThwackDevicePool>>();
@@ -703,13 +702,10 @@ public class AppThwackRecorder extends Recorder {
          * @return
          */
         public AppThwackApi getAppThwackApi() {
-            if (api == null) {
-                if (apiKey == null || apiKey.isEmpty()) {
-                    return null;
-                }
-                api = new AppThwackApi(apiKey);
+            if (apiKey == null || apiKey.isEmpty()) {
+                return null;
             }
-            return api;
+            return new AppThwackApi(apiKey);
         }
 
         /**
