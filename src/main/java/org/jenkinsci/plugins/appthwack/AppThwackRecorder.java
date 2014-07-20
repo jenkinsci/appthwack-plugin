@@ -121,10 +121,14 @@ public class AppThwackRecorder extends Recorder {
 
     @Override
     public boolean perform(AbstractBuild build, Launcher launcher, BuildListener listener) throws IOException, InterruptedException {
-        // Build failed earlier in the chain, no need to test.
-        if (build.getResult().isWorseOrEqualTo(Result.FAILURE)) {
+        // Check if the build result set from a previous build step.
+        // A null build result indicates that the build is still ongoing and we're
+        // likely being run as a build step by the "Any Build Step Plugin".
+        Result buildResult = build.getResult();
+        if (buildResult != null && buildResult.isWorseOrEqualTo(Result.FAILURE)) {
             return false;
         }
+
         EnvVars env =  build.getEnvironment(listener);
         Map<String, String> parameters = build.getBuildVariables();
         log = listener.getLogger();
